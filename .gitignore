@@ -1,0 +1,8 @@
+__pychache__/
+*.pyc
+.pytest_cache/
+.vscode/
+.tmp.driveupload/
+venv/
+.images/
+moead.egg-info/
