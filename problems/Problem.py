@@ -5,7 +5,7 @@ from solutions import Solution
 class Problem(ABC):
     """
     Define la interfaz para un problema de optimización.
-    (Nota: Ya no es responsable de Crossover o Mutación).
+    Ahora incluye el número de restricciones y 'evaluate' debe calcularlas.
     """
     @property
     @abstractmethod
@@ -15,8 +15,14 @@ class Problem(ABC):
         
     @property
     @abstractmethod
+    def n_constraints(self) -> int:
+        """El número de restricciones."""
+        raise NotImplementedError
+        
+    @property
+    @abstractmethod
     def bounds(self) -> list[tuple[float, float]]:
-        """Límites de las variables [(min1, max1), (min2, max2), ...]."""
+        """Límites de las variables [(min1, max1), ...]."""
         raise NotImplementedError
         
     @abstractmethod
@@ -26,5 +32,8 @@ class Problem(ABC):
         
     @abstractmethod
     def evaluate(self, solution: Solution):
-        """Calcula y actualiza los objetivos de una solución."""
+        """
+        Calcula y actualiza los 'objectives' Y los 'constraints'
+        de una solución dada.
+        """
         raise NotImplementedError

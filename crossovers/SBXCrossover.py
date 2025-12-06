@@ -27,7 +27,7 @@ class SBXCrossover(Crossover):
         
         # Si no se aplica el cruce, devolver un clon del primer padre
         if np.random.rand() > self.prob_cross:
-            return ZDTSolution(np.copy(p1_vars), parent1.objectives.shape[0])
+            return ZDTSolution(np.copy(p1_vars), parent1.objectives.shape[0], parent1.constraints.shape[0])
 
         # Lógica matemática de SBX
         rand = np.random.random(p1_vars.shape)
@@ -48,4 +48,4 @@ class SBXCrossover(Crossover):
         c1 = np.clip(c1, min_b, max_b)
         
         # Devolver la nueva solución hija
-        return ZDTSolution(c1, parent1.objectives.shape[0])
+        return ZDTSolution(c1, parent1.objectives.shape[0], parent1.constraints.shape[0])

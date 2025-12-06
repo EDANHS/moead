@@ -3,7 +3,6 @@ import numpy as np
 
 from problems.Problem import Problem
 from solutions import Solution
-# (Asume que Solution, Problem, etc. están definidos)
 
 class EvolutionaryOperator(ABC):
     """
