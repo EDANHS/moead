@@ -5,12 +5,12 @@ import matplotlib
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 
-from crossovers import SBXCrossover
-from mutations import PolynomialMutation
-from algorithms import MOEAD
-from problems import Problem, ZDT4Problem
-from scalarizations import PBI, Tchebycheff
-from evolutionary_operator import CrossoverMutation, DifferentialEvolution
+from moead.crossovers import SBXCrossover
+from moead.mutations import PolynomialMutation
+from moead.algorithms import MOEAD
+from moead.problems import Problem, ZDT4Problem
+from moead.scalarizations import PBI, Tchebycheff
+from moead.evolutionary_operator import CrossoverMutation, DifferentialEvolution
 
 IMG_DIR = ".images"
 os.makedirs(IMG_DIR, exist_ok=True)

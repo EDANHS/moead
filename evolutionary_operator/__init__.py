@@ -1,3 +1,0 @@
-from evolutionary_operator.EvolutionaryOperator import EvolutionaryOperator
-from evolutionary_operator.CrossoverMutation import CrossoverMutation
-from evolutionary_operator.DifferentialEvolution import DifferentialEvolution

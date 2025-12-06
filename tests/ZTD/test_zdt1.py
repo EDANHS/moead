@@ -2,12 +2,12 @@ import os
 import numpy as np
 import matplotlib
 
-from algorithms import MOEAD
-from crossovers import SBXCrossover
-from evolutionary_operator import CrossoverMutation, DifferentialEvolution
-from mutations import PolynomialMutation
-from problems import Problem, ZDT1Problem
-from scalarizations import Tchebycheff, PBI
+from moead.algorithms import MOEAD
+from moead.crossovers import SBXCrossover
+from moead.evolutionary_operator import CrossoverMutation, DifferentialEvolution
+from moead.mutations import PolynomialMutation
+from moead.problems import Problem, ZDT1Problem
+from moead.scalarizations import Tchebycheff, PBI
 
 matplotlib.use('Agg') 
 import matplotlib.pyplot as plt

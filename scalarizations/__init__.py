@@ -1,4 +1,0 @@
-from scalarizations.Scalarization import Scalarization
-from scalarizations.WeightedSum import WeightedSum
-from scalarizations.PBI import PBI
-from scalarizations.Tchebycheff import Tchebycheff

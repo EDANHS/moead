@@ -6,11 +6,11 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-from algorithms import MOEAD_DL
-from scalarizations import WeightedSum
-from evolutionary_operator import DifferentialEvolution
-from problems import DLProblem
-from solutions import DLSolution
+from moead.algorithms import MOEAD_DL
+from moead.scalarizations import WeightedSum
+from moead.evolutionary_operator import DifferentialEvolution
+from moead.problems import DLProblem
+from moead.solutions import DLSolution
 
 
 IMG_DIR = ".images"
