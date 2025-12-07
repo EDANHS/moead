@@ -37,10 +37,10 @@ class DLProblem(Problem):
         self.epochs = epochs
         
         # 2. Definir los Espacios de Búsqueda
-        self.filters_opts = [4, 8, 16, 32, 64] # Agregado 64 ya que tienes hardware de sobra
+        self.filters_opts = [4, 8, 16, 32] # Agregado 64 ya que tienes hardware de sobra
         self.kernel_opts = [(1,1), (3,3), (5,5)]
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
-        self.norm_opts = ['Batch', 'Instance', 'Group', None]
+        self.norm_opts = ['Batch', None]
         self.pool_opts = ['Max', 'Average']
         self.upsample_opts = ['TransposeConv', 'BilinearUpsample']
         self.bias_opts = [True, False]
@@ -75,7 +75,7 @@ class DLProblem(Problem):
 
         # Configuración máxima teórica
         max_config = {
-            'depth': 4, 'initial_filters': 64, 'kernel_size': (5,5),
+            'depth': 4, 'initial_filters': 32, 'kernel_size': (5,5),
             'activation_name': 'ReLU', 'norm_type': 'Batch', 'dropout_rate': 0.0,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
