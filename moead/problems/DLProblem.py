@@ -124,34 +124,16 @@ class DLProblem(Problem):
         }
         return config
 
-    # --- NUEVO: MOTOR DE DATOS OPTIMIZADO PARA RTX 5080 ---
     def _create_dataset(self, x, y, is_training=True):
-        """Crea un pipeline asíncrono BLINDADO para RTX 5080."""
-        
-        # 1. Crear dataset desde slices
+        # Como x e y ya son float32 (desde el script principal), 
+        # from_tensor_slices no necesita hacer Cast.
         dataset = tf.data.Dataset.from_tensor_slices((x, y))
         
-        # --- PARCHE DE SEGURIDAD: CASTING EXPLÍCITO EN CPU ---
-        # Forzamos que los datos sean float32 AHORA MISMO.
-        # Esto elimina la operación [Op:Cast] de la GPU.
-        def force_float32(img, mask):
-            return tf.cast(img, tf.float32), tf.cast(mask, tf.float32)
-            
-        dataset = dataset.map(force_float32, num_parallel_calls=tf.data.AUTOTUNE)
-        # -----------------------------------------------------
-
-        # 2. Cache
         dataset = dataset.cache()
-        
         if is_training:
             dataset = dataset.shuffle(buffer_size=1024)
-        
-        # 3. Batching
         dataset = dataset.batch(self.batch_size)
-        
-        # 4. Prefetch
         dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        
         return dataset
 
     def evaluate(self, solution):

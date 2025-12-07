@@ -1,28 +1,17 @@
 """
 Small runner script to execute MOEAD_DL for DL hyperparameter optimization.
-OPTIMIZED RUNNER: Cleans up imports and relies on installed package.
+ RTX 5080 COMPATIBILITY MODE: Soft Device Placement Enabled.
 """
 from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
-# ==============================================================================
-# 🛑 PARCHE NUCLEAR V2 PARA RTX 5080 (BLACKWELL)
-# ==============================================================================
-import os
-
-# 1. Desactivar XLA/JIT (Causa principal de INVALID_PTX)
-os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false --tf_xla_auto_jit=0"
-
-# 2. Desactivar TensorFloat-32 (TF32)
-# Las tarjetas nuevas usan esto por defecto para acelerar, pero en TF viejo falla.
-os.environ["NVIDIA_TF32_OVERRIDE"] = "0" 
-
-# 3. Logs limpios
+# --- CONFIGURACIÓN PREVIA A TENSORFLOW ---
+# Forzamos desactivación de logs molestos
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" 
-# ==============================================================================
 
 import numpy as np
 import matplotlib
@@ -50,38 +39,44 @@ def parse_args():
     return p.parse_args()
 
 def configure_device(use_gpu: bool):
-    """Configura la GPU con ESTABILIDAD MÁXIMA para RTX 5080."""
+    """
+    Configura la GPU con modo de compatibilidad para RTX 5080 (Blackwell).
+    Activa Soft Device Placement para evitar crashes en Ops no soportadas.
+    """
     if use_gpu:
         os.environ.pop('CUDA_VISIBLE_DEVICES', None)
         print('--> GPU mode requested.')
         try:
             import tensorflow as tf
             
-            # 1. Configurar Memory Growth (Vital para evitar INVALID_HANDLE)
+            # 1. SOFT DEVICE PLACEMENT (LA SOLUCIÓN MÁGICA)
+            # Si una operación (como Cast) falla en GPU por drivers nuevos,
+            # TF la moverá silenciosamente a CPU en lugar de crashear.
+            tf.config.set_soft_device_placement(True)
+            print("--> Soft Device Placement: ACTIVADO (Safety Net)")
+
+            # 2. Memory Growth
             gpus = tf.config.list_physical_devices('GPU')
             if gpus:
                 try:
                     for gpu in gpus:
                         tf.config.experimental.set_memory_growth(gpu, True)
-                    print(f"--> Memory Growth activado para: {gpus}")
+                    print(f"--> Memory Growth activado para: {len(gpus)} GPU(s)")
                 except RuntimeError as e:
                     print(f"--> Error configurando Memory Growth: {e}")
-
-            # 2. Desactivamos Mixed Precision por ahora para estabilidad
-            # from tensorflow.keras import mixed_precision
-            # policy = mixed_precision.Policy('mixed_float16')
-            # mixed_precision.set_global_policy(policy)
             
-            print("--> Modo: Float32 Standard (Estabilidad activada)")
+            # 3. float32 Estricto
+            # Desactivamos Mixed Precision para evitar Casts innecesarios
+            print("--> Precision: Float32 (Mixed Precision Desactivado por estabilidad)")
 
         except ImportError:
-            print("--> Error importando TensorFlow para configuración de GPU.")
+            print("--> Error importando TensorFlow.")
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
         print('--> CPU mode: disabling CUDA_VISIBLE_DEVICES')
 
 def load_data(root_path: Path) -> tuple:
-    """Carga datos directamente desde la estructura del proyecto."""
+    """Carga datos y asegura float32 desde el origen."""
     data_dir = root_path / 'data' 
     path_x = data_dir / "images_train.npy"
     path_y = data_dir / "masks_train.npy"
@@ -92,8 +87,8 @@ def load_data(root_path: Path) -> tuple:
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
     try:
-        # --- CAMBIO CRÍTICO AQUÍ ---
-        # Convertimos a float32 INMEDIATAMENTE para evitar Casts en la GPU
+        # CONVERSIÓN PREVENTIVA A FLOAT32
+        # Esto evita que TF intente hacer Casts dentro de la GPU
         X = np.load(path_x).astype(np.float32)
         Y = np.load(path_y).astype(np.float32)
         print(f"--> Datos cargados y convertidos a float32. Shape X: {X.shape}")
@@ -101,7 +96,8 @@ def load_data(root_path: Path) -> tuple:
         raise RuntimeError(f"Error cargando .npy: {e}")
     
     X_t, X_v, Y_t, Y_v = train_test_split(X, Y, test_size=0.2, random_state=42)
-    del X, Y
+    # Liberamos memoria de los originales inmediatamente
+    del X, Y 
     return X_t, Y_t, X_v, Y_v
 
 def plot_front(archive, out_path: Path):
@@ -113,7 +109,7 @@ def plot_front(archive, out_path: Path):
     plt.scatter(f1, f2, s=20, c='blue', alpha=0.6)
     plt.xlabel('Dice Loss (Minimizar)')
     plt.ylabel('Norm Params (Minimizar)')
-    plt.title(f'MOEAD-DL Pareto Front ({len(archive)} soluciones)')
+    plt.title(f'MOEAD-DL Pareto Front ({len(archive)} solutions)')
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.savefig(out_path)
@@ -136,8 +132,8 @@ def plot_history(history: dict, out_path: Path):
         
         plt.subplot(2, 1, 1)
         if z_star.shape[0] > 0 and z_star.shape[1] >= 2:
-            plt.plot(gens, z_star[:, 0], label='Best Dice Loss found')
-            plt.plot(gens, z_star[:, 1], label='Best Size found')
+            plt.plot(gens, z_star[:, 0], label='Best Dice Loss')
+            plt.plot(gens, z_star[:, 1], label='Best Size')
         plt.title("Evolución del Punto Ideal (Z*)")
         plt.legend(); plt.grid(True)
         
