@@ -20,7 +20,8 @@ class DLProblem(Problem):
                  X_test=None, Y_test=None,
                  input_shape=(256, 256, 1),
                  batch_size: int = 16, # Aumentado por defecto para aprovechar GPU
-                 epochs: int = 10):
+                 epochs: int = 20,
+                 patience: int = 5):
         
         self.input_shape = input_shape
 
@@ -35,6 +36,7 @@ class DLProblem(Problem):
 
         self.batch_size = batch_size
         self.epochs = epochs
+        self.patience = patience
         
         # 2. Definir los Espacios de Búsqueda
         self.filters_opts = [4, 8, 16, 32] # Agregado 64 ya que tienes hardware de sobra
@@ -164,14 +166,18 @@ class DLProblem(Problem):
 
             # --- ENTRENAMIENTO ---
             # Corregido: Monitor 'val_loss' (min) en lugar de 'val_dice' (min)
-            stopper = EarlyStopping(monitor='val_loss', patience=3, mode='min', restore_best_weights=True)
+            callbacks = []
+
+            if self.patience > 0:
+                stopper = EarlyStopping(monitor='val_loss', patience=self.patience, mode='min', restore_best_weights=True)
+                callbacks.append(stopper)
 
             history = model.fit(
                 train_ds,          # Usamos el pipeline, no numpy directo
                 validation_data=val_ds,
                 epochs=self.epochs,
                 batch_size=self.batch_size,
-                callbacks=[stopper],
+                callbacks=callbacks,
                 verbose=0          # 0 para mayor velocidad en consola, 1 para debug
             )
 

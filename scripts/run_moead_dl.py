@@ -30,9 +30,9 @@ PROJECT_ROOT = CURRENT_SCRIPT.parent
 def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL optimization")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
-    p.add_argument('--n_generations', type=int, default=200, help='Generations')
-    p.add_argument('--h_divisions', type=int, default=149, help='H divisions')
-    p.add_argument('--n_neighbors', type=int, default=30, help='Neighbors')
+    p.add_argument('--n_generations', type=int, default=40, help='Generations')
+    p.add_argument('--h_divisions', type=int, default=29, help='H divisions')
+    p.add_argument('--n_neighbors', type=int, default=6, help='Neighbors')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements')
     p.add_argument('--log', type=str, default='moead_dl_log.json', help='Log file')
     p.add_argument('--checkpoint', type=str, default='moead_dl_checkpoint.pkl', help='Checkpoint')
@@ -136,7 +136,7 @@ def main():
         print(f"FATAL: {e}")
         return
 
-    problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=32)
+    problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=16)
     
     scalarization = PBI()
     evo_op = DifferentialEvolution(F=0.5, CR=0.6, selection_prob=0.9)
