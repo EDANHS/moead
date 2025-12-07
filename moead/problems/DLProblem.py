@@ -19,7 +19,7 @@ class DLProblem(Problem):
                  X_val, Y_val, 
                  X_test=None, Y_test=None,
                  input_shape=(256, 256, 1),
-                 batch_size: int = 32, # Aumentado por defecto para aprovechar GPU
+                 batch_size: int = 16, # Aumentado por defecto para aprovechar GPU
                  epochs: int = 10):
         
         self.input_shape = input_shape
@@ -170,6 +170,7 @@ class DLProblem(Problem):
                 train_ds,          # Usamos el pipeline, no numpy directo
                 validation_data=val_ds,
                 epochs=self.epochs,
+                batch_size=self.batch_size,
                 callbacks=[stopper],
                 verbose=0          # 0 para mayor velocidad en consola, 1 para debug
             )
