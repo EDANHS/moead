@@ -150,8 +150,13 @@ class DLProblem(Problem):
             model = build_unet(self.input_shape, **config)
             
             # --- COMPILACIÓN ---
-            # JIT compile=True acelera XLA en tarjetas nuevas
-            model.compile(optimizer='adam', loss=dice_loss, metrics=[dice_coefficient], jit_compile=False)
+            model.compile(
+                optimizer='adam', 
+                loss=dice_loss, 
+                metrics=[dice_coefficient], 
+                jit_compile=False,   # Asegúrate que esto esté en False
+                run_eagerly=True     # <--- EL SALVAVIDAS
+            )
 
             # --- PREPARACIÓN DE DATOS (PIPELINE) ---
             train_ds = self._create_dataset(self.X_train, self.Y_train, is_training=True)

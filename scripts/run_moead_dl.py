@@ -39,41 +39,18 @@ def parse_args():
     return p.parse_args()
 
 def configure_device(use_gpu: bool):
-    """
-    Configura la GPU con modo de compatibilidad para RTX 5080 (Blackwell).
-    Activa Soft Device Placement para evitar crashes en Ops no soportadas.
-    """
     if use_gpu:
         os.environ.pop('CUDA_VISIBLE_DEVICES', None)
-        print('--> GPU mode requested.')
-        try:
-            import tensorflow as tf
+        import tensorflow as tf
+        
+        # Solo activamos Memory Growth
+        gpus = tf.config.list_physical_devices('GPU')
+        for gpu in gpus:
+            try:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            except: pass
             
-            # 1. SOFT DEVICE PLACEMENT (LA SOLUCIÓN MÁGICA)
-            # Si una operación (como Cast) falla en GPU por drivers nuevos,
-            # TF la moverá silenciosamente a CPU en lugar de crashear.
-            tf.config.set_soft_device_placement(True)
-            print("--> Soft Device Placement: ACTIVADO (Safety Net)")
-
-            # 2. Memory Growth
-            gpus = tf.config.list_physical_devices('GPU')
-            if gpus:
-                try:
-                    for gpu in gpus:
-                        tf.config.experimental.set_memory_growth(gpu, True)
-                    print(f"--> Memory Growth activado para: {len(gpus)} GPU(s)")
-                except RuntimeError as e:
-                    print(f"--> Error configurando Memory Growth: {e}")
-            
-            # 3. float32 Estricto
-            # Desactivamos Mixed Precision para evitar Casts innecesarios
-            print("--> Precision: Float32 (Mixed Precision Desactivado por estabilidad)")
-
-        except ImportError:
-            print("--> Error importando TensorFlow.")
-    else:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''
-        print('--> CPU mode: disabling CUDA_VISIBLE_DEVICES')
+        print("--> Modo Compatibilidad RTX 5080: Float32 + Eager Execution (Pendiente de activar en compile)")
 
 def load_data(root_path: Path) -> tuple:
     """Carga datos y asegura float32 desde el origen."""
