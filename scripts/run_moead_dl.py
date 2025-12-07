@@ -7,21 +7,36 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+
+# ==============================================================================
+# 🛑 PARCHE NUCLEAR V2 PARA RTX 5080 (BLACKWELL)
+# ==============================================================================
+import os
+
+# 1. Desactivar XLA/JIT (Causa principal de INVALID_PTX)
+os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false --tf_xla_auto_jit=0"
+
+# 2. Desactivar TensorFloat-32 (TF32)
+# Las tarjetas nuevas usan esto por defecto para acelerar, pero en TF viejo falla.
+os.environ["NVIDIA_TF32_OVERRIDE"] = "0" 
+
+# 3. Logs limpios
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2" 
+# ==============================================================================
+
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # Backend sin interfaz gráfica (ideal para servidores/background)
+matplotlib.use('Agg') 
 import matplotlib.pyplot as plt
 
-# --- IMPORTS DE TU LIBRERÍA (Ya no requieren parches sys.path) ---
 from sklearn.model_selection import train_test_split
 from moead.algorithms import MOEAD_DL
 from moead.evolutionary_operator import DifferentialEvolution
 from moead.scalarizations import PBI
 from moead.problems import DLProblem
 
-# Configuración de rutas relativas simples
 CURRENT_SCRIPT = Path(__file__).resolve()
-PROJECT_ROOT = CURRENT_SCRIPT.parent # Asumiendo scripts/run.py -> root es ../
+PROJECT_ROOT = CURRENT_SCRIPT.parent 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL optimization")
@@ -35,21 +50,30 @@ def parse_args():
     return p.parse_args()
 
 def configure_device(use_gpu: bool):
-    """Configura la GPU y Mixed Precision para RTX 5080."""
+    """Configura la GPU con ESTABILIDAD MÁXIMA para RTX 5080."""
     if use_gpu:
         os.environ.pop('CUDA_VISIBLE_DEVICES', None)
         print('--> GPU mode requested.')
         try:
             import tensorflow as tf
-            # Verificar visibilidad física
-            gpus = tf.config.list_physical_devices('GPU')
-            print(f"--> TensorFlow ve {len(gpus)} GPUs: {gpus}")
             
-            # Activar Mixed Precision (Vital para RTX 5080)
-            from tensorflow.keras import mixed_precision
-            policy = mixed_precision.Policy('mixed_float16')
-            mixed_precision.set_global_policy(policy)
-            print('--> Mixed Precision (float16) activado.')
+            # 1. Configurar Memory Growth (Vital para evitar INVALID_HANDLE)
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                try:
+                    for gpu in gpus:
+                        tf.config.experimental.set_memory_growth(gpu, True)
+                    print(f"--> Memory Growth activado para: {gpus}")
+                except RuntimeError as e:
+                    print(f"--> Error configurando Memory Growth: {e}")
+
+            # 2. Desactivamos Mixed Precision por ahora para estabilidad
+            # from tensorflow.keras import mixed_precision
+            # policy = mixed_precision.Policy('mixed_float16')
+            # mixed_precision.set_global_policy(policy)
+            
+            print("--> Modo: Float32 Standard (Estabilidad activada)")
+
         except ImportError:
             print("--> Error importando TensorFlow para configuración de GPU.")
     else:
@@ -58,9 +82,7 @@ def configure_device(use_gpu: bool):
 
 def load_data(root_path: Path) -> tuple:
     """Carga datos directamente desde la estructura del proyecto."""
-    # Ajusta esta ruta si tus datos están en otro lado (ej. 'data' o 'dataset')
     data_dir = root_path / 'data' 
-    
     path_x = data_dir / "images_train.npy"
     path_y = data_dir / "masks_train.npy"
     
@@ -70,20 +92,20 @@ def load_data(root_path: Path) -> tuple:
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
     try:
-        X = np.load(path_x)
-        Y = np.load(path_y)
-        print(f"--> Datos cargados. Shape X: {X.shape}")
+        # --- CAMBIO CRÍTICO AQUÍ ---
+        # Convertimos a float32 INMEDIATAMENTE para evitar Casts en la GPU
+        X = np.load(path_x).astype(np.float32)
+        Y = np.load(path_y).astype(np.float32)
+        print(f"--> Datos cargados y convertidos a float32. Shape X: {X.shape}")
     except Exception as e:
         raise RuntimeError(f"Error cargando .npy: {e}")
     
-    # Split
     X_t, X_v, Y_t, Y_v = train_test_split(X, Y, test_size=0.2, random_state=42)
-    del X, Y # Liberar RAM
+    del X, Y
     return X_t, Y_t, X_v, Y_v
 
 def plot_front(archive, out_path: Path):
     if not archive: return
-    # Extraer objetivos. Ojo: asegúrate que tus objetivos sean 1-Dice y NormParams
     f1 = [s.objectives[0] for s in archive]
     f2 = [s.objectives[1] for s in archive]
     
@@ -98,7 +120,6 @@ def plot_front(archive, out_path: Path):
     plt.close()
 
 def plot_history(history: dict, out_path: Path):
-    # Lógica robusta para graficar historial
     try:
         if hasattr(history, 'get_history'):
             h = history.get_history()
@@ -113,7 +134,6 @@ def plot_history(history: dict, out_path: Path):
         gens = np.arange(len(archive_sizes))
         plt.figure(figsize=(10, 8))
         
-        # Subplot 1: Punto Ideal (Z*)
         plt.subplot(2, 1, 1)
         if z_star.shape[0] > 0 and z_star.shape[1] >= 2:
             plt.plot(gens, z_star[:, 0], label='Best Dice Loss found')
@@ -121,11 +141,10 @@ def plot_history(history: dict, out_path: Path):
         plt.title("Evolución del Punto Ideal (Z*)")
         plt.legend(); plt.grid(True)
         
-        # Subplot 2: Tamaño del Archivo
         plt.subplot(2, 1, 2)
         plt.plot(gens, archive_sizes, 'r-o', label='Archive Size')
         plt.xlabel("Generación")
-        plt.title("Tamaño del Archivo Externo (Soluciones No Dominadas)")
+        plt.title("Tamaño del Archivo Externo")
         plt.legend(); plt.grid(True)
         
         plt.tight_layout()
@@ -138,23 +157,17 @@ def main():
     args = parse_args()
     configure_device(args.use_gpu)
     
-    # 1. Cargar Datos
     try:
         X_train, Y_train, X_val, Y_val = load_data(PROJECT_ROOT)
     except Exception as e:
         print(f"FATAL: {e}")
         return
 
-    # 2. Configurar Problema (Aquí ocurre la magia de tf.data)
-    # Pasamos batch_size=32 o 64 para la RTX 5080
     problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=32)
     
-    # 3. Configurar Algoritmo
     scalarization = PBI()
-    # CR (Crossover Rate) alto (0.9) suele ser mejor para DE en problemas continuos
     evo_op = DifferentialEvolution(F=0.5, CR=0.6, selection_prob=0.9)
 
-    # Rutas de salida
     img_dir = PROJECT_ROOT / 'images'
     img_dir.mkdir(exist_ok=True, parents=True)
     
@@ -175,10 +188,8 @@ def main():
         checkpoint_file=str(chk_path),
     )
 
-    # 4. Ejecutar
     archive, history = moead.run()
 
-    # 5. Guardar Resultados
     plot_front(archive, img_dir / 'moead_dl_front.png')
     plot_history(history, img_dir / 'moead_dl_history.png')
     
