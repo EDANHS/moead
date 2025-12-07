@@ -21,7 +21,7 @@ from moead.problems import DLProblem
 
 # Configuración de rutas relativas simples
 CURRENT_SCRIPT = Path(__file__).resolve()
-PROJECT_ROOT = CURRENT_SCRIPT # Asumiendo scripts/run.py -> root es ../
+PROJECT_ROOT = CURRENT_SCRIPT.parent # Asumiendo scripts/run.py -> root es ../
 
 def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL optimization")
