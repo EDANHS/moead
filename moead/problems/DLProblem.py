@@ -262,7 +262,7 @@ class DLProblem(Problem):
                 validation_data=val_ds,
                 epochs=self.epochs,
                 callbacks=callbacks,
-                verbose=0          # 0 para mayor velocidad en consola, 1 para debug
+                verbose=1          # 0 para mayor velocidad en consola, 1 para debug
             )
 
             # --- CÁLCULO DE OBJETIVOS ---
