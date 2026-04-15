@@ -20,7 +20,7 @@ class DLProblem(Problem):
                  X_val, Y_val, 
                  X_test=None, Y_test=None,
                  input_shape=(256, 256, 1),
-                 batch_size: int = 8,  # Reducido para mitigar errores de layout en capas de normalización y dropout
+                 batch_size: int = 4,  # Estático para room en profiling de cuDNN
                  epochs: int = 20,
                  patience: int = 5):
         
@@ -47,8 +47,8 @@ class DLProblem(Problem):
         mixed_precision.set_global_policy('mixed_float16')
         
         # 2. Definir los Espacios de Búsqueda (EXPANDIDO)
-        self.filters_opts = [i for i in range(2, 129, 2)]  # De 2 a 128 en pasos de 2
-        self.kernel_opts = [(1,1), (3,3), (5,5), (7,7)]  # Agregado kernel 7x7
+        self.filters_opts = [i for i in range(2, 65, 2)]  # De 2 a 128 en pasos de 2
+        self.kernel_opts = [(1,1), (3,3), (5,5)]  # Agregado kernel 7x7
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None']  # Expandido a 4
         self.pool_opts = ['Max', 'Average']
