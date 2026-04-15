@@ -20,7 +20,7 @@ class DLProblem(Problem):
                  X_val, Y_val, 
                  X_test=None, Y_test=None,
                  input_shape=(256, 256, 1),
-                 batch_size: int = 4,  # Estático para room en profiling de cuDNN
+                 batch_size: int = 8,  # Ajustado para balancear memoria y estabilidad
                  epochs: int = 20,
                  patience: int = 5):
         
@@ -185,7 +185,7 @@ class DLProblem(Problem):
                 validation_data=val_ds,
                 epochs=self.epochs,
                 callbacks=callbacks,
-                verbose=1          # 0 para mayor velocidad en consola, 1 para debug
+                verbose=1          # Cambiado a 1 para debug de OOM
             )
 
             # --- CÁLCULO DE OBJETIVOS ---
@@ -203,11 +203,11 @@ class DLProblem(Problem):
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
-            print(f"    Arquitectura inviable por OOM, penalizando.")
+            print(f"    OOM detectado: {str(e)} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         except Exception as e:
-            print(f"    Error en evaluación, penalizando.")
+            print(f"    Error general: {str(e)} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         finally:
