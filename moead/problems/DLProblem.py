@@ -43,6 +43,9 @@ class DLProblem(Problem):
         self.gpu_memory_gb = 12.0  # RTX 5080 ~12GB VRAM
         self.memory_threshold = 0.8  # 80% de VRAM máxima permitida
         
+        # Precisión Mixta Global para reducir memoria VRAM
+        mixed_precision.set_global_policy('mixed_float16')
+        
         # 2. Definir los Espacios de Búsqueda (EXPANDIDO)
         self.filters_opts = [i for i in range(2, 129, 2)]  # De 2 a 128 en pasos de 2
         self.kernel_opts = [(1,1), (3,3), (5,5), (7,7)]  # Agregado kernel 7x7
@@ -87,14 +90,14 @@ class DLProblem(Problem):
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
 
-        K.clear_session()
+        # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
         try:
             m_min = build_unet(self.input_shape, **min_config)
             p_min = m_min.count_params()
             del m_min
         except: p_min = 200.0
 
-        K.clear_session()
+        # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
         try:
             m_max = build_unet(self.input_shape, **max_config)
             p_max = m_max.count_params()
@@ -102,7 +105,7 @@ class DLProblem(Problem):
         except:
             p_max = 30_000_000.0 # Fallback seguro
 
-        K.clear_session()
+        # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
         gc.collect()
         return float(p_min), float(p_max)
 
@@ -113,11 +116,11 @@ class DLProblem(Problem):
         """
         try:
             # Crear modelo temporal para contar parámetros
-            K.clear_session()
+            # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
             temp_model = build_unet(self.input_shape, **config)
             n_params = temp_model.count_params()
             del temp_model
-            K.clear_session()
+            # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
             
             # Estimación conservadora de memoria (AJUSTADA PARA MIXED PRECISION - float16)
             # 1. Parámetros del modelo (float16 = 2 bytes)
@@ -201,7 +204,8 @@ class DLProblem(Problem):
     def _create_dataset(self, x, y, is_training=True):
         # Como x e y ya son float32 (desde el script principal), 
         # from_tensor_slices no necesita hacer Cast.
-        dataset = tf.data.Dataset.from_tensor_slices((x, y))
+        with tf.device('/CPU:0'):
+            dataset = tf.data.Dataset.from_tensor_slices((x, y))
         
         dataset = dataset.cache()
         if is_training:
@@ -214,10 +218,6 @@ class DLProblem(Problem):
         # Limpieza agresiva antes de empezar
         K.clear_session()
         gc.collect()
-
-        # HABILITAR PRECISIÓN MIXTA PARA REDUCIR MEMORIA (float16)
-        # Esto reduce ~50% el uso de VRAM al usar float16 en lugar de float32
-        mixed_precision.set_global_policy('mixed_float16')
 
         config = self.decode_solution(solution.variables)
         solution.model_config = config
@@ -242,8 +242,7 @@ class DLProblem(Problem):
                 optimizer='adam', 
                 loss=dice_loss, 
                 metrics=[dice_coefficient], 
-                jit_compile=False,   # Asegúrate que esto esté en False
-                run_eagerly=True     # <--- EL SALVAVIDAS
+                jit_compile=False   # Asegúrate que esto esté en False
             )
 
             # --- PREPARACIÓN DE DATOS (PIPELINE) ---
@@ -262,7 +261,6 @@ class DLProblem(Problem):
                 train_ds,          # Usamos el pipeline, no numpy directo
                 validation_data=val_ds,
                 epochs=self.epochs,
-                batch_size=self.batch_size,
                 callbacks=callbacks,
                 verbose=0          # 0 para mayor velocidad en consola, 1 para debug
             )
