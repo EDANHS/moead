@@ -7,36 +7,48 @@ def build_unet(input_shape=(256, 256, 1),
                depth=4,
                kernel_size=3,
                activation_name='relu',
-               norm_type='batch',  # Por defecto Batch
+               norm_type='batch',
                dropout_rate=0.0,
                use_bias=False,
                pooling_type='max',
                upsample_type='transpose',
                **kwargs):
 
-    # --- 1. HELPER DE NORMALIZACIÓN SIMPLIFICADO ---
+
+    # --- 1. HELPER DE NORMALIZACIÓN ---
     def get_norm_layer(norm_type_str):
-        # Si es None, no ponemos nada
         if norm_type_str is None:
             return layers.Lambda(lambda x: x)
         
-        # Para cualquier otro caso ('Batch', 'Group', 'Instance'),
-        # devolvemos SIEMPRE BatchNormalization.
-        # Así evitamos errores si el algoritmo genético intenta pedir otra cosa.
-        return layers.BatchNormalization()
+        ns = str(norm_type_str).lower()
+        if ns == 'none':
+            return layers.Lambda(lambda x: x)
+        elif ns == 'batch':
+            return layers.BatchNormalization()
+        elif ns == 'layer':
+            return layers.LayerNormalization()
+        elif ns == 'instance':
+            # Instance norm aproximado usando Lambda
+            return layers.Lambda(lambda x: (x - tf.reduce_mean(x, axis=[1, 2], keepdims=True)) / 
+                                           (tf.math.reduce_std(x, axis=[1, 2], keepdims=True) + 1e-6))
+        else:
+            return layers.BatchNormalization()
 
     # --- 2. HELPER DE ACTIVACIÓN ---
     def get_activation_layer(act_name):
-        if act_name is None: return layers.ReLU()
+        if act_name is None: 
+            return layers.ReLU()
         an = str(act_name).lower()
-        
-        if an == 'relu': return layers.ReLU()
-        elif an == 'elu': return layers.ELU()
-        elif an == 'leakyrelu': return layers.LeakyReLU()
+        if an == 'relu': 
+            return layers.ReLU()
+        elif an == 'elu': 
+            return layers.ELU()
+        elif an == 'leakyrelu': 
+            return layers.LeakyReLU(alpha=0.2)
         elif an == 'gelu': 
             try:
                 return layers.Activation(tf.keras.activations.gelu)
-            except AttributeError:
+            except:
                 return layers.ELU() 
         elif an == 'swish': 
             return layers.Activation(tf.keras.activations.swish)
@@ -45,7 +57,10 @@ def build_unet(input_shape=(256, 256, 1),
     # --- 3. HELPER DE POOLING ---
     def get_pooling_layer(pool_name):
         pn = str(pool_name).lower()
-        if 'average' in pn: return layers.AveragePooling2D((2, 2))
+        if 'average' in pn or 'avg' in pn: 
+            return layers.AveragePooling2D((2, 2))
+        elif 'strided' in pn:
+            return None  # Usaremos stride en lugar de pooling
         return layers.MaxPooling2D((2, 2))
 
     # --- 4. BLOQUE CONVOLUCIONAL ---

@@ -31,11 +31,11 @@ def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL optimization")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
     p.add_argument('--n_generations', type=int, default=40, help='Generations')
-    p.add_argument('--h_divisions', type=int, default=29, help='H divisions')
+    p.add_argument('--h_divisions', type=int, default=99, help='H divisions (aumentado para espacio expandido)')
     p.add_argument('--n_neighbors', type=int, default=6, help='Neighbors')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements')
-    p.add_argument('--log', type=str, default='moead_dl_log.json', help='Log file')
-    p.add_argument('--checkpoint', type=str, default='moead_dl_checkpoint.pkl', help='Checkpoint')
+    p.add_argument('--log', type=str, default='moead_dl_log_ctv.json', help='Log file')
+    p.add_argument('--checkpoint', type=str, default='moead_dl_checkpoint_ctv.pkl', help='Checkpoint')
     return p.parse_args()
 
 def configure_device(use_gpu: bool):
@@ -54,9 +54,9 @@ def configure_device(use_gpu: bool):
 
 def load_data(root_path: Path) -> tuple:
     """Carga datos y asegura float32 desde el origen."""
-    data_dir = root_path / 'data' 
-    path_x = data_dir / "images_train.npy"
-    path_y = data_dir / "masks_train.npy"
+    data_dir = root_path / 'dataset_moead_5k_final/' 
+    path_x = data_dir / "X_train_ctv.npy"
+    path_y = data_dir / "Y_train_ctv.npy"
     
     print(f"--> Cargando datos desde: {data_dir}")
     
