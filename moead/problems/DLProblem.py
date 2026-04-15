@@ -109,73 +109,6 @@ class DLProblem(Problem):
         gc.collect()
         return float(p_min), float(p_max)
 
-    def _estimate_memory_usage(self, config: dict) -> tuple[float, bool]:
-        """
-        Estima el uso de memoria GPU para una configuración dada.
-        Retorna: (memoria_estimada_GB, es_valida)
-        """
-        try:
-            # Crear modelo temporal para contar parámetros
-            # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
-            temp_model = build_unet(self.input_shape, **config)
-            n_params = temp_model.count_params()
-            del temp_model
-            # K.clear_session()  # comentado para no destruir el handle CUDA entre iteraciones
-            
-            # Estimación conservadora de memoria (AJUSTADA PARA MIXED PRECISION - float16)
-            # 1. Parámetros del modelo (float16 = 2 bytes)
-            param_memory = n_params * 2 / (1024**3)  # GB
-            
-            # 2. Memoria de activaciones (estimación aproximada)
-            # Para U-Net: feature maps en cada nivel del encoder/decoder
-            depth = config['depth']
-            initial_filters = config['initial_filters']
-            
-            # Estimar tamaño de feature maps por nivel
-            activation_memory = 0
-            current_size = 256  # Asumiendo input 256x256
-            current_filters = initial_filters
-            
-            # Encoder: 4 niveles + bottleneck
-            for level in range(depth + 1):
-                # Feature map size en este nivel
-                level_size = current_size * current_size * current_filters * self.batch_size * 2 / (1024**3)
-                activation_memory += level_size
-                current_size //= 2
-                current_filters *= 2
-            
-            # Decoder: niveles simétricos
-            current_size = 32  # Después del bottleneck
-            current_filters = initial_filters * (2 ** depth)
-            for level in range(depth):
-                current_filters //= 2
-                current_size *= 2
-                level_size = current_size * current_size * current_filters * self.batch_size * 2 / (1024**3)
-                activation_memory += level_size
-            
-            # 3. Gradientes (aprox 2x parámetros para forward/backward) - también float16
-            gradient_memory = param_memory * 2
-            
-            # 4. Optimizador Adam (2 estados por parámetro) - float16
-            optimizer_memory = param_memory * 2
-            
-            # Memoria total estimada
-            total_memory = param_memory + activation_memory + gradient_memory + optimizer_memory
-            
-            # Margen de seguridad (20% extra)
-            total_memory *= 1.2
-            
-            # Verificar si cabe en GPU
-            max_allowed = self.gpu_memory_gb * self.memory_threshold
-            is_valid = total_memory <= max_allowed
-            
-            return total_memory, is_valid
-            
-        except Exception as e:
-            # Si hay error en la estimación, asumir inválida
-            print(f"    Error en estimación de memoria: {e}")
-            return self.gpu_memory_gb, False
-
     @property
     def n_objectives(self) -> int: return self._n_objectives
     @property
@@ -219,21 +152,11 @@ class DLProblem(Problem):
         K.clear_session()
         gc.collect()
 
-        config = self.decode_solution(solution.variables)
-        solution.model_config = config
-        print(f"\n--> Evaluando arquitectura: {config}")
-
-        # ESTIMACIÓN DE MEMORIA ANTES DE CONSTRUIR (AJUSTADA PARA MIXED PRECISION)
-        estimated_memory, memory_valid = self._estimate_memory_usage(config)
-        print(f"    Estimación de memoria: {estimated_memory:.2f}GB / {self.gpu_memory_gb:.1f}GB disponible")
-        
-        if not memory_valid:
-            print(f"    ❌ ARQUITECTURA INVALIDA: Excede límite de memoria ({self.memory_threshold*100:.0f}%)")
-            # Penalización extrema por arquitectura inválida
-            solution.objectives = np.array([1.0, 1.0])
-            return
-
         try:
+            config = self.decode_solution(solution.variables)
+            solution.model_config = config
+            print(f"\n--> Evaluando arquitectura: {config}")
+
             # --- CONSTRUCCIÓN ---
             model = build_unet(self.input_shape, **config)
             
@@ -280,13 +203,11 @@ class DLProblem(Problem):
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
-            print(f"    ERROR DE MEMORIA GPU (cuDNN/Backpropagation): {str(e)}")
-            # Penalización extrema por arquitectura inviable debido a OOM
+            print(f"    Arquitectura inviable por OOM, penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         except Exception as e:
-            print(f"    ERROR CRÍTICO GENERAL: {str(e)}")
-            # Penalización extrema
+            print(f"    Error en evaluación, penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         finally:
