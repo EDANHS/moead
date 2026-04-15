@@ -58,8 +58,8 @@ class DLProblem(Problem):
         # 3. Definir los Bounds Numéricos para DE (EXPANDIDO)
         self._bounds = [
             (1.0, 5.99),                      # 0: Depth [1-5]
-            (0.0, len(self.filters_opts) - 0.01), # 1: Filters (64 opciones granulares)
-            (0.0, len(self.kernel_opts) - 0.01),  # 2: Kernel (4 tamaños: 1x1, 3x3, 5x5, 7x7)
+            (0.0, len(self.filters_opts) - 0.01), # 1: Filters (3 opciones: 16,32,64)
+            (0.0, len(self.kernel_opts) - 0.01),  # 2: Kernel (2 tamaños: 3x3, 5x5)
             (0.0, len(self.act_opts) - 0.01),     # 3: Activation (5 opciones)
             (0.0, len(self.norm_opts) - 0.01),    # 4: Norm (4: Batch, Layer, Instance, None)
             (0.0, 0.8),                       # 5: Dropout [0.0 - 0.8]
@@ -78,14 +78,14 @@ class DLProblem(Problem):
     def _calculate_param_bounds(self):
         """Calcula min/max params para normalización."""
         min_config = {
-            'depth': 1, 'initial_filters': 4, 'kernel_size': (1,1),
+            'depth': 1, 'initial_filters': 2, 'kernel_size': (1,1),
             'activation_name': 'ReLU', 'norm_type': 'None', 'dropout_rate': 0.0,
             'use_bias': False, 'pooling_type': 'Max', 'upsample_type': 'BilinearUpsample'
         }
 
         # Configuración máxima teórica
         max_config = {
-            'depth': 5, 'initial_filters': 128, 'kernel_size': (7,7),
+            'depth': 5, 'initial_filters': 64, 'kernel_size': (5,5),
             'activation_name': 'Swish', 'norm_type': 'Batch', 'dropout_rate': 0.8,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
