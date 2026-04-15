@@ -20,7 +20,7 @@ class DLProblem(Problem):
                  X_val, Y_val, 
                  X_test=None, Y_test=None,
                  input_shape=(256, 256, 1),
-                 batch_size: int = 16, # Aumentado por defecto para aprovechar GPU
+                 batch_size: int = 8,  # Reducido para mitigar errores de layout en capas de normalización y dropout
                  epochs: int = 20,
                  patience: int = 5):
         
@@ -41,7 +41,7 @@ class DLProblem(Problem):
         
         # Configuración de memoria GPU
         self.gpu_memory_gb = 12.0  # RTX 5080 ~12GB VRAM
-        self.memory_threshold = 0.8  # 80% de VRAM máxima permitida
+        self.memory_threshold = 0.65  # 65% de VRAM máxima permitida para mayor robustez
         
         # Precisión Mixta Global para reducir memoria VRAM
         mixed_precision.set_global_policy('mixed_float16')
@@ -279,8 +279,13 @@ class DLProblem(Problem):
 
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
 
+        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+            print(f"    ERROR DE MEMORIA GPU (cuDNN/Backpropagation): {str(e)}")
+            # Penalización extrema por arquitectura inviable debido a OOM
+            solution.objectives = np.array([1.0, 1.0])
+        
         except Exception as e:
-            print(f"    ERROR CRÍTICO: {str(e)}")
+            print(f"    ERROR CRÍTICO GENERAL: {str(e)}")
             # Penalización extrema
             solution.objectives = np.array([1.0, 1.0])
         
