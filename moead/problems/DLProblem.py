@@ -157,9 +157,12 @@ class DLProblem(Problem):
             yi.set_shape(self.input_shape)
             return xi, yi
 
-        ds = ds.map(_load_by_index, num_parallel_calls=tf.data.AUTOTUNE)
+        # Reduce parallelism and prefetch to avoid GPU memory spikes during
+        # the py_function -> Tensor copy. Small num_parallel_calls and
+        # prefetch=1 minimize concurrent tensors in flight.
+        ds = ds.map(_load_by_index, num_parallel_calls=1)
         ds = ds.batch(self.batch_size)
-        ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+        ds = ds.prefetch(1)
         return ds
 
     def evaluate(self, solution):

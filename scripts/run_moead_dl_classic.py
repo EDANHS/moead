@@ -81,32 +81,20 @@ def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.
     path_x = data_dir / f'X_train_{organo}_5k.npy'
     path_y = data_dir / f'Y_train_{organo}_5k.npy'
 
-    print(f"--> Iniciando Carga Diferida (Memory Mapping) desde: {data_dir}")
+    print(f"--> Cargando datos desde: {data_dir}")
 
     if not path_x.exists() or not path_y.exists():
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
-    # 1. Cargar como mapa de memoria (Cero impacto en RAM)
-    X_mmap = np.load(path_x, mmap_mode='r')
-    Y_mmap = np.load(path_y, mmap_mode='r')
-    print(f"--> Disco mapeado. Shape total X: {X_mmap.shape}")
+    try:
+        X = np.load(path_x).astype(np.float32)
+        Y = np.load(path_y).astype(np.float32)
+        print(f"--> Datos cargados y convertidos a float32. Shape X: {X.shape}")
+    except Exception as e:
+        raise RuntimeError(f"Error cargando .npy: {e}")
 
-    # 2. Generar SOLO los índices para dividir, sin mover los datos reales
-    indices = np.arange(len(X_mmap))
-    idx_train, idx_val = train_test_split(indices, test_size=0.2, random_state=42)
-    print(f"--> Total de muestras disponibles: {len(indices)}")
-    print(f"--> Muestras de entrenamiento: {len(idx_train)}")
-    print(f"--> Muestras de validación: {len(idx_val)}")
-
-    # 3. Retornar vistas referenciadas. 
-    # El casteo a float32 se delega al generador (como DLProblem o TF)
-    X_t = X_mmap[idx_train]
-    Y_t = Y_mmap[idx_train]
-    X_v = X_mmap[idx_val]
-    Y_v = Y_mmap[idx_val]
-
-    print(f"--> Separación por índices completada. Shape X_train: {X_t.shape}")
-    
+    X_t, X_v, Y_t, Y_v = train_test_split(X, Y, test_size=0.2, random_state=42)
+    del X, Y
     return X_t, Y_t, X_v, Y_v
 
 
