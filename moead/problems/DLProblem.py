@@ -53,7 +53,7 @@ class DLProblem(Problem):
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None']  # Expandido a 4
         self.pool_opts = ['Max', 'Average']
         self.upsample_opts = ['TransposeConv', 'BilinearUpsample']
-        self.bias_opts = [True, False]
+        self.bias_opts = [True, False] 
         
         # 3. Definir los Bounds Numéricos para DE (EXPANDIDO)
         self._bounds = [
@@ -135,17 +135,32 @@ class DLProblem(Problem):
         return config
 
     def _create_dataset(self, x, y, is_training=True):
-        # Como x e y ya son float32 (desde el script principal), 
-        # from_tensor_slices no necesita hacer Cast.
-        with tf.device('/CPU:0'):
-            dataset = tf.data.Dataset.from_tensor_slices((x, y))
-        
-        dataset = dataset.cache()
+        # Implementación segura para mmap: creamos un dataset de índices y
+        # cargamos muestras bajo demanda usando tf.py_function. Evita
+        # materializar el dataset completo en RAM (no usar dataset.cache()).
+        n = len(x)
+        indices = np.arange(n)
+
+        ds = tf.data.Dataset.from_tensor_slices(indices)
         if is_training:
-            dataset = dataset.shuffle(buffer_size=1024)
-        dataset = dataset.batch(self.batch_size)
-        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        return dataset
+            ds = ds.shuffle(buffer_size=min(1024, n))
+
+        def _load_by_index(i):
+            # i: scalar tf.Tensor
+            def _read(idx):
+                xi = np.asarray(x[int(idx)], dtype=np.float32)
+                yi = np.asarray(y[int(idx)], dtype=np.float32)
+                return xi, yi
+
+            xi, yi = tf.py_function(_read, [i], Tout=(tf.float32, tf.float32))
+            xi.set_shape(self.input_shape)
+            yi.set_shape(self.input_shape)
+            return xi, yi
+
+        ds = ds.map(_load_by_index, num_parallel_calls=tf.data.AUTOTUNE)
+        ds = ds.batch(self.batch_size)
+        ds = ds.prefetch(buffer_size=tf.data.AUTOTUNE)
+        return ds
 
     def evaluate(self, solution):
         # Limpieza agresiva antes de empezar

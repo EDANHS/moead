@@ -67,11 +67,11 @@ class JSONLogger:
                 config = getattr(sol, 'model_config')
 
             sol_data = {
-                "id": i, 
+                "id": i,
                 "variables": sol.variables.tolist() if isinstance(sol.variables, np.ndarray) else sol.variables,
                 "objectives": sol.objectives.tolist() if isinstance(sol.objectives, np.ndarray) else sol.objectives,
                 "constraints": sol.constraints.tolist() if isinstance(sol.constraints, np.ndarray) else sol.constraints,
-                "model_config": config 
+                "model_config": self._sanitize_model_config(config)
             }
             gen_data["solutions"].append(sol_data)
 
@@ -81,3 +81,53 @@ class JSONLogger:
     def _save(self):
         with open(self.filename, 'w') as f:
             json.dump(self.data, f, indent=4)
+
+    def _sanitize_model_config(self, cfg):
+        """Reduce/replace large objects in model_config to keep JSON small.
+
+        Rules:
+        - Numpy arrays -> replaced with their dtype and shape
+        - Lists/tuples longer than 100 elements -> replaced with length
+        - Any unknown object -> replaced with its type name
+        """
+        if cfg is None:
+            return None
+
+        # Primitive types are safe
+        if isinstance(cfg, (str, int, float, bool)):
+            return cfg
+
+        # Numpy arrays
+        if isinstance(cfg, np.ndarray):
+            return {"__ndarray__": True, "shape": cfg.shape, "dtype": str(cfg.dtype)}
+
+        # Dicts: sanitize recursively
+        if isinstance(cfg, dict):
+            out = {}
+            for k, v in cfg.items():
+                try:
+                    if isinstance(v, np.ndarray):
+                        out[k] = {"__ndarray__": True, "shape": v.shape, "dtype": str(v.dtype)}
+                    elif isinstance(v, (list, tuple)):
+                        if len(v) > 100:
+                            out[k] = {"__large_list__": True, "length": len(v)}
+                        else:
+                            out[k] = [self._sanitize_model_config(x) for x in v]
+                    elif isinstance(v, (str, int, float, bool)):
+                        out[k] = v
+                    elif isinstance(v, dict):
+                        out[k] = self._sanitize_model_config(v)
+                    else:
+                        out[k] = {"__type__": type(v).__name__}
+                except Exception:
+                    out[k] = {"__type__": type(v).__name__}
+            return out
+
+        # Lists/tuples
+        if isinstance(cfg, (list, tuple)):
+            if len(cfg) > 100:
+                return {"__large_list__": True, "length": len(cfg)}
+            return [self._sanitize_model_config(x) for x in cfg]
+
+        # Fallback: return the type name
+        return {"__type__": type(cfg).__name__}

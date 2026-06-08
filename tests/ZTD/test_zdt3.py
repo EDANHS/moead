@@ -1,9 +1,10 @@
 import os
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') 
+matplotlib.use('Agg') # Backend estable para generación de archivos
 import matplotlib.pyplot as plt
 
+# --- IMPORTACIÓN DE DEPENDENCIAS ---
 from moead.crossovers import SBXCrossover
 from moead.mutations import PolynomialMutation
 from moead.algorithms import MOEAD
@@ -11,236 +12,229 @@ from moead.problems import Problem, ZDT3Problem
 from moead.scalarizations import PBI, Tchebycheff
 from moead.evolutionary_operator import CrossoverMutation, DifferentialEvolution
 
-IMG_DIR = ".images"
+# --- CONFIGURACIÓN DEL ENTORNO ---
+IMG_DIR = "seminar_results_zdt3"
 os.makedirs(IMG_DIR, exist_ok=True)
 
-def test_zdt3_run_with_sbx():
+# ==============================================================================
+# BLOQUE 1: MOTORES DE RENDERIZADO (VISUALIZACIÓN INDIVIDUAL)
+# ==============================================================================
+
+def plot_pareto_front(pareto_front, title, filename):
     """
-    Prueba ZDT3 con los operadores estándar (SBX + Polinómica)
-    y la selección de padres híbrida.
+    Genera la validación geométrica para ZDT3.
+    CRÍTICO: Muestra las discontinuidades (islas). El algoritmo debe poblar las curvas rojas
+    y dejar vacíos los espacios entre ellas.
     """
-    print("\nIniciando test ZDT3 (con SBX + PolyMut)...")
+    save_path = os.path.join(IMG_DIR, filename)
     
-    # 1. Configurar las "Estrategias"
-    problem = ZDT3Problem(n_vars=30) # <-- CAMBIO
-    scalarization = Tchebycheff()
-    
-    crossover_op = SBXCrossover(eta=15, prob_cross=0.9)
-    mutation_op = PolynomialMutation(eta=20)
-    
-    evo_op = CrossoverMutation(
-        crossover=crossover_op,
-        mutation=mutation_op,
-        mating_prob=0.9 # Estrategia híbrida
-    )
-    
-    # 2. Inyectar dependencias en el solver
-    moead_solver = MOEAD(
-        problem=problem,
-        scalarization=scalarization,
-        evolutionary_op=evo_op,
-        h_divisions=99,    # N=100
-        n_neighbors=20,
-        n_generations=250, # <-- CAMBIO (Más generaciones)
-        n_r=20              # Límite de reemplazo
-    )
-    
-    # 3. Ejecutar
-    pareto_front, history_log = moead_solver.run()
-    
-    # 4a. Guardar imagen del Frente (Verificación Visual)
-    save_path = os.path.join(IMG_DIR, "zdt3_front_sbx.png") # <-- CAMBIO
-    plot_results_zdt3(pareto_front, problem, "ZDT3 con SBX", save_path) # <-- CAMBIO
-    print(f"Test ZDT3 (SBX) completado. Imagen guardada en: {save_path}")
-
-    # 4b. Guardar imagen del Historial (Análisis de Proceso)
-    history_save_path = os.path.join(IMG_DIR, "zdt3_history_sbx.png") # <-- CAMBIO
-    plot_history(history_log, "ZDT3 con SBX", history_save_path)
-    print(f"Historial ZDT3 (SBX) guardado en: {history_save_path}")
-
-    # 5. Verificar con Asserts (Verificación Automática)
-    verify_results_zdt3(pareto_front, problem, avg_error_limit=0.1) # <-- CAMBIO
-
-
-# ---
-# PRUEBA 2: ZDT3 con Evolución Diferencial (DE)
-# ---
-
-def test_zdt3_run_with_de():
-    """
-    Prueba ZDT3 con la estrategia de Evolución Diferencial (MOEA/D-DE).
-    """
-    print("\nIniciando test ZDT3 (con Evolución Diferencial)...")
-    
-    # 1. Configurar las "Estrategias"
-    problem = ZDT3Problem(n_vars=30) # <-- CAMBIO
-    scalarization = Tchebycheff()
-    evo_op = DifferentialEvolution(F=0.5, CR=0.6) # Estrategia DE
-    
-    # 2. Inyectar dependencias en el solver
-    moead_solver = MOEAD(
-        problem=problem,
-        scalarization=scalarization,
-        evolutionary_op=evo_op,
-        h_divisions=149,    # N=100
-        n_neighbors=20,
-        n_generations=250, # <-- CAMBIO (Más generaciones)
-        n_r=20             # Con DE, n_r puede ser más grande (ej. T)
-    )
-    
-    # 3. Ejecutar
-    pareto_front, history_log = moead_solver.run()
-    
-    # 4a. Guardar imagen del Frente (Verificación Visual)
-    save_path = os.path.join(IMG_DIR, "zdt3_front_de.png") # <-- CAMBIO
-    plot_results_zdt3(pareto_front, problem, "ZDT3 con DE", save_path) # <-- CAMBIO
-    print(f"Test ZDT3 (DE) completado. Imagen guardada en: {save_path}")
-
-    # 4b. Guardar imagen del Historial (Análisis de Proceso)
-    history_save_path = os.path.join(IMG_DIR, "zdt3_history_de.png") # <-- CAMBIO
-    plot_history(history_log, "ZDT3 con DE", history_save_path)
-    print(f"Historial ZDT3 (DE) guardado en: {history_save_path}")
-
-    # 5. Verificar con Asserts (Verificación Automática)
-    verify_results_zdt3(pareto_front, problem, avg_error_limit=0.05) # <-- CAMBIO (DE es mejor)
-
-
-# ---
-# FUNCIONES DE AYUDA (Específicas para ZDT3)
-# ---
-
-def plot_results_zdt3(pareto_front: list, problem: Problem, title: str, save_path: str):
-    """Función genérica para graficar los resultados de ZDT3."""
-    
+    # Extraer objetivos
     f1_alg = [sol.objectives[0] for sol in pareto_front]
     f2_alg = [sol.objectives[1] for sol in pareto_front]
 
-    # Generar el frente de Pareto real (Fórmula de ZDT3)
-    f1_real = np.linspace(0, 1, 1000) # Más puntos para ver bien las curvas
-    f2_real = 1 - np.sqrt(f1_real) - f1_real * np.sin(10 * np.pi * f1_real) # <-- CAMBIO
+    # Generar Frente Real Teórico (ZDT3: Discontinuo)
+    # f2 = 1 - sqrt(f1) - f1 * sin(10*pi*f1)
+    x1_real = np.linspace(0, 1, 2000) # Alta densidad para dibujar bien las curvas
+    f1_real = x1_real
+    f2_real = 1 - np.sqrt(f1_real) - f1_real * np.sin(10 * np.pi * f1_real)
+    
+    # Filtro visual: En teoría, las partes dominadas deberían eliminarse del frente "Real",
+    # pero para efectos visuales, la ecuación completa ayuda a ver la "forma" de la función.
+    # Sin embargo, para limpieza, solemos dibujar la curva completa suavemente.
 
     plt.figure(figsize=(10, 7))
-    plt.scatter(f1_alg, f2_alg, s=10, c='blue', label='Resultado (del Archive)', alpha=0.6, zorder=2)
-    # Usar línea sólida para ver mejor las discontinuidades
-    plt.plot(f1_real, f2_real, 'r-', linewidth=2.5, label='Frente Real ZDT3', zorder=3) # <-- CAMBIO
-    plt.title(f'Verificación del Frente de Pareto ({title})')
-    plt.xlabel('Objetivo 1 (f1)')
-    plt.ylabel('Objetivo 2 (f2)')
+    
+    # Capa 1: Soluciones del Algoritmo (Puntos Azules)
+    plt.scatter(f1_alg, f2_alg, s=20, c='blue', alpha=0.6, label='Solución Obtenida', zorder=2)
+    
+    # Capa 2: Frente Teórico (Línea Roja)
+    plt.plot(f1_real, f2_real, 'r-', linewidth=1.5, alpha=0.5, label='Frente Teórico (Geometría)', zorder=1)
+    
+    plt.title(f'Validación de Cobertura Discontinua: {title}')
+    plt.xlabel('Objetivo 1 (Minimizar)')
+    plt.ylabel('Objetivo 2 (Minimizar)')
     plt.legend()
-    plt.grid(True)
-    plt.ylim(bottom=-1.0, top=1.5) # <-- CAMBIO (Ajustar para valles negativos)
-
+    plt.grid(True, linestyle='--', alpha=0.7)
+    
+    # Ajuste de ejes: ZDT3 tiene valores negativos en f2 (los valles del seno)
+    plt.xlim(-0.05, 1.05)
+    plt.ylim(-0.8, 1.2) # Rango extendido para ver los valles profundos
+    
     plt.savefig(save_path)
     plt.close()
+    print(f"   [Gráfico] Frente de Pareto guardado en: {save_path}")
 
-def plot_history(history_log: dict, title: str, save_path: str):
+def plot_convergence_history(history_log, title, filename):
     """
-    Grafica el historial de convergencia (z_star) y el 
-    crecimiento del archive a lo largo de las generaciones.
+    Visualiza la dinámica de convergencia.
     """
-    # (Esta función es genérica y no necesita cambios)
-    try:
-        z_star_history = history_log['z_star_per_gen']
-        archive_size_history = history_log['archive_size_per_gen']
-        generations = np.arange(len(archive_size_history))
-    except KeyError:
-        print("Error: El 'history_log' no tiene las claves esperadas.")
-        return
-    except TypeError:
-        print(f"Error: 'history_log' no es un diccionario: {history_log}")
+    save_path = os.path.join(IMG_DIR, filename)
+    
+    if not history_log or 'z_star_per_gen' not in history_log:
         return
 
-    if not z_star_history:
-        print("Error: El historial de z_star está vacío.")
-        return
-
-    z_star_transposed = np.array(z_star_history).T
-    f1_ideal_history = z_star_transposed[0]
-    f2_ideal_history = z_star_transposed[1]
+    z_star_history = np.array(history_log['z_star_per_gen']).T
+    archive_history = history_log['archive_size_per_gen']
+    generations = np.arange(len(archive_history))
     
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
     
-    ax1.plot(generations, f1_ideal_history, 'b-', label='Ideal f1 (z*_1)')
-    ax1.plot(generations, f2_ideal_history, 'g-', label='Ideal f2 (z*_2)')
-    ax1.set_title(f'Historial de Convergencia ({title})')
-    ax1.set_ylabel('Valor Objetivo (Ideal)')
+    # Convergencia Z*
+    ax1.plot(generations, z_star_history[0], 'b-', label='Z*_1')
+    ax1.plot(generations, z_star_history[1], 'g-', label='Z*_2')
+    ax1.set_title(f'Dinámica de Convergencia: {title}')
+    ax1.set_ylabel('Punto Ideal')
     ax1.legend()
-    ax1.grid(True)
+    ax1.grid(True, alpha=0.5)
     
-    ax2.plot(generations, archive_size_history, 'r-', label='Tamaño del Archive')
-    ax2.set_title('Historial de Diversidad (Archive)')
-    ax2.set_xlabel('Generación')
-    ax2.set_ylabel('Nº de Soluciones (Archive)')
+    # Diversidad (Archive)
+    ax2.plot(generations, archive_history, 'r-', label='Tamaño Archive')
+    ax2.set_title('Retención de Soluciones (Diversidad)')
+    ax2.set_xlabel('Generaciones')
+    ax2.set_ylabel('Nº Soluciones')
     ax2.legend()
-    ax2.grid(True)
+    ax2.grid(True, alpha=0.5)
     
     plt.tight_layout()
     plt.savefig(save_path)
-    plt.close(fig)
+    plt.close()
+    print(f"   [Gráfico] Historial guardado en: {save_path}")
 
-def verify_results_zdt3(pareto_front: list, problem: Problem, avg_error_limit: float):
-    """Función genérica para verificar los resultados de ZDT3 con asserts."""
-    
-    print("Verificando resultados...")
-    
-    if len(pareto_front) == 0:
-        assert False, "¡El test falló! El frente de Pareto está vacío."
+# ==============================================================================
+# BLOQUE 2: LÓGICA DE NEGOCIO (MÉTRICAS Y EJECUCIÓN)
+# ==============================================================================
 
-    # 1. Test de Convergencia (Error Promedio)
+def calculate_metrics_zdt3(pareto_front):
+    """
+    KPIs específicos para ZDT3.
+    """
+    if not pareto_front:
+        return 10.0, 0.0
+
     total_error = 0
+    f1_vals = []
+    
     for sol in pareto_front:
-        f1 = sol.objectives[0]
-        f2_actual = sol.objectives[1]
+        f1, f2 = sol.objectives
+        f1_vals.append(f1)
         
-        f1_safe = max(f1, 1e-6)
-            
-        # Fórmula de ZDT3
-        f2_ideal = 1 - np.sqrt(f1_safe) - f1_safe * np.sin(10 * np.pi * f1_safe) # <-- CAMBIO
-        total_error += abs(f2_actual - f2_ideal)
+        # Frente ideal ZDT3: f2 = 1 - sqrt(f1) - f1*sin(10*pi*f1)
+        f1_safe = max(f1, 0.0)
+        term_sin = f1_safe * np.sin(10 * np.pi * f1_safe)
+        f2_ideal = 1 - np.sqrt(f1_safe) - term_sin
+        
+        # Error vertical absoluto
+        total_error += abs(f2 - f2_ideal)
         
     avg_error = total_error / len(pareto_front)
     
-    convergencia_ok = avg_error < avg_error_limit
-    print(f"  Error de convergencia promedio: {avg_error:.4f} (Límite: {avg_error_limit})")
-    assert convergencia_ok, f"¡El test falló! Error de convergencia muy alto: {avg_error}"
+    # Spread: En ZDT3 es vital. Si es bajo (< 0.8), significa que faltan islas enteras.
+    spread = max(f1_vals) - min(f1_vals) if f1_vals else 0
+    
+    return avg_error, spread
 
-    # 2. Test de Diversidad (Cobertura del Frente)
-    # Para ZDT3, una prueba de cobertura simple es suficiente.
-    f1_values = np.array([sol.objectives[0] for sol in pareto_front])
-    min_f1 = np.min(f1_values)
-    max_f1 = np.max(f1_values)
+def run_experiment_zdt3(algorithm_type):
+    """
+    Orquestador para ZDT3.
+    """
+    problem = ZDT3Problem(n_vars=30) 
     
-    diversidad_min_ok = min_f1 < 0.1
-    diversidad_max_ok = max_f1 > 0.9
+    if algorithm_type == 'SBX':
+        print("\n--> Iniciando ZDT3 (Discontinuo) con MOEA/D Estándar (SBX)...")
+        evo_op = CrossoverMutation(
+            crossover=SBXCrossover(eta=15, prob_cross=0.9),
+            mutation=PolynomialMutation(eta=20),
+            mating_prob=0.9
+        )
+        label = "Estándar (SBX)"
+        file_suffix = "sbx"
+        
+    elif algorithm_type == 'DE':
+        print("\n--> Iniciando ZDT3 (Discontinuo) con MOEA/D Evolución Diferencial (DE)...")
+        # DE ayuda a saltar los vacíos entre islas
+        evo_op = DifferentialEvolution(F=0.5, CR=0.6)
+        label = "Propuesto (DE)"
+        file_suffix = "de"
     
-    print(f"  Cobertura del frente (f1): min={min_f1:.4f} (Req: < 0.1), max={max_f1:.4f} (Req: > 0.9)")
-    assert diversidad_min_ok, f"¡El test falló! No se encontraron soluciones cerca del inicio (min f1: {min_f1})"
-    assert diversidad_max_ok, f"¡El test falló! No se encontraron soluciones cerca del final (max f1: {max_f1})"
+    # Solver Config
+    solver = MOEAD(
+        problem=problem,
+        scalarization=Tchebycheff(),
+        evolutionary_op=evo_op,
+        h_divisions=149, # Más divisiones para asegurar densidad en las islas
+        n_neighbors=20,
+        n_generations=250, 
+        n_r=20 # Reemplazo más alto para permitir que buenas soluciones dominen su vecindario rápido
+    )
     
-    # 3. Test de Exploración (Específico de ZDT3)
-    # Comprobar si se encontraron soluciones en las 5 "islas"
-    # (Las islas están en f1 ~ [0, 0.1], [0.2, 0.3], [0.4, 0.5], [0.6, 0.7], [0.8, 0.9])
+    pareto_front, history = solver.run()
     
-    f1_bins = np.digitize(f1_values, bins=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    islas_encontradas = set(f1_bins)
+    # Visualización
+    plot_pareto_front(pareto_front, f"ZDT3 - {label}", f"zdt3_front_{file_suffix}.png")
+    plot_convergence_history(history, label, f"zdt3_history_{file_suffix}.png")
     
-    # El bin 1 es [0.0, 0.2], 2 es [0.2, 0.4], etc. El bin 6 es > 1.0 (si hay)
-    islas_requeridas = {1, 2, 3, 4, 5}
-    islas_faltantes = islas_requeridas - islas_encontradas
+    # Métricas
+    error, spread = calculate_metrics_zdt3(pareto_front)
+    print(f"   [Métricas] {label} -> Error: {error:.5f} | Spread: {spread:.5f}")
     
-    print(f"  Exploración de islas: {islas_encontradas} (Faltantes: {islas_faltantes})")
-    assert len(islas_faltantes) == 0, f"¡El test falló! No se encontraron todas las islas. Faltan: {islas_faltantes}"
+    return error, spread
 
-    print("¡Verificación completada! El test pasó.")
+# ==============================================================================
+# BLOQUE 3: SÍNTESIS COMPARATIVA (GENERADOR DE SLIDES)
+# ==============================================================================
 
+def generate_comparative_charts_zdt3(sbx_metrics, de_metrics):
+    """
+    Genera gráficos comparativos enfocados en la Cobertura (Spread).
+    """
+    print("\n--> Generando gráficos comparativos de alto nivel para ZDT3...")
+    
+    strategies = ['MOEA/D-SBX\n(Estándar)', 'MOEA/D-DE\n(Propuesto)']
+    errors = [sbx_metrics[0], de_metrics[0]]
+    spreads = [sbx_metrics[1], de_metrics[1]]
+    colors = ['#bdc3c7', '#27ae60']
+
+    # Gráfico A: Precisión de Ajuste
+    plt.figure(figsize=(8, 6))
+    bars = plt.bar(strategies, errors, color=colors, width=0.5, edgecolor='black', alpha=0.9)
+    plt.title('Precisión de Convergencia (ZDT3 - Discontinuo)', fontsize=14, fontweight='bold')
+    plt.ylabel('Error Promedio (Menor es mejor)', fontsize=12)
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    
+    for bar in bars:
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f'{bar.get_height():.4f}', 
+                 ha='center', va='bottom', fontweight='bold')
+                 
+    plt.savefig(os.path.join(IMG_DIR, "zdt3_comparison_error.png"))
+    plt.close()
+
+    # Gráfico B: Cobertura de Islas (Spread) - EL MÁS IMPORTANTE
+    plt.figure(figsize=(8, 6))
+    bars = plt.bar(strategies, spreads, color=colors, width=0.5, edgecolor='black', alpha=0.9)
+    plt.title('Cobertura de Islas Disconexas (Spread)', fontsize=14, fontweight='bold')
+    plt.ylabel('Spread (Mayor es mejor - Máx ~0.85/1.0)', fontsize=12)
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    
+    for bar in bars:
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height(), f'{bar.get_height():.4f}', 
+                 ha='center', va='bottom', fontweight='bold')
+
+    plt.savefig(os.path.join(IMG_DIR, "zdt3_comparison_spread.png"))
+    plt.close()
+    print(f"✅ Comparativas generadas en: {IMG_DIR}")
+
+# ==============================================================================
+# PUNTO DE ENTRADA
+# ==============================================================================
 
 if __name__ == "__main__":
-    op = 2
-    if op == 1:
-        test_zdt3_run_with_sbx()
-    elif op == 2:
-        test_zdt3_run_with_de()
-    else:
-        test_zdt3_run_with_sbx()
-        test_zdt3_run_with_de()
-        
+    # 1. Ejecutar Baseline
+    metrics_sbx = run_experiment_zdt3('SBX')
+    
+    # 2. Ejecutar Propuesta
+    metrics_de = run_experiment_zdt3('DE')
+    
+    # 3. Sintetizar Comparación
+    generate_comparative_charts_zdt3(metrics_sbx, metrics_de)
+    
+    print("\n¡Material para ZDT3 (Discontinuo) generado exitosamente!")

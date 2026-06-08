@@ -9,3 +9,5 @@ moead.egg-info/
 colabs/
 data/
 *.ipynb
+dataset_*
+moead_dl_*
