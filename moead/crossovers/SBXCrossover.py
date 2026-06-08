@@ -1,7 +1,7 @@
 import numpy as np
 
 from moead.crossovers import Crossover
-from moead.solutions import Solution, ZDTSolution
+from moead.solutions import Solution
 
 
 class SBXCrossover(Crossover):
@@ -27,7 +27,7 @@ class SBXCrossover(Crossover):
         
         # Si no se aplica el cruce, devolver un clon del primer padre
         if np.random.rand() > self.prob_cross:
-            return ZDTSolution(np.copy(p1_vars), parent1.objectives.shape[0], parent1.constraints.shape[0])
+            return type(parent1)(np.copy(p1_vars), parent1.objectives.shape[0], parent1.constraints.shape[0])
 
         # Lógica matemática de SBX
         rand = np.random.random(p1_vars.shape)
@@ -47,5 +47,5 @@ class SBXCrossover(Crossover):
         max_b = np.array([b[1] for b in bounds])
         c1 = np.clip(c1, min_b, max_b)
         
-        # Devolver la nueva solución hija
-        return ZDTSolution(c1, parent1.objectives.shape[0], parent1.constraints.shape[0])
+        # Devolver la nueva solución hija, manteniendo la clase de la entrada
+        return type(parent1)(c1, parent1.objectives.shape[0], parent1.constraints.shape[0])

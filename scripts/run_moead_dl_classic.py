@@ -35,9 +35,9 @@ from moead.problems import DLProblem
 def parse_args():
     p = argparse.ArgumentParser(description="Run classic MOEAD_DL without DifferentialEvolution")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
-    p.add_argument('--n_generations', type=int, default=40, help='Generations')
-    p.add_argument('--h_divisions', type=int, default=99, help='H divisions (aumentado para espacio expandido)')
-    p.add_argument('--n_neighbors', type=int, default=6, help='Neighbors')
+    p.add_argument('--n_generations', type=int, default=25, help='Generations')
+    p.add_argument('--h_divisions', type=int, default=49, help='H divisions (aumentado para espacio expandido)')
+    p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
     p.add_argument('--patience', type=int, default=5, help='Epochs de paciencia para early stopping en entrenamiento de')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements')
     p.add_argument('--organo', type=str, default='ctv', help='Órgano a entrenar, usado en nombres de archivo y resultados')
@@ -94,6 +94,9 @@ def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.
     # 2. Generar SOLO los índices para dividir, sin mover los datos reales
     indices = np.arange(len(X_mmap))
     idx_train, idx_val = train_test_split(indices, test_size=0.2, random_state=42)
+    print(f"--> Total de muestras disponibles: {len(indices)}")
+    print(f"--> Muestras de entrenamiento: {len(idx_train)}")
+    print(f"--> Muestras de validación: {len(idx_val)}")
 
     # 3. Retornar vistas referenciadas. 
     # El casteo a float32 se delega al generador (como DLProblem o TF)
@@ -221,7 +224,7 @@ def main():
         mating_prob=0.9,
     )
 
-    output_dir = PROJECT_ROOT / 'resultados' / f'resultado_{args.organo}'
+    output_dir = PROJECT_ROOT / f'resultados' / f'resultado_{args.organo}'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = output_dir / args.log
