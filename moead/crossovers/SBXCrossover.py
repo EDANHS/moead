@@ -41,11 +41,18 @@ class SBXCrossover(Crossover):
 
         # Generar el hijo (solo usamos uno en MOEA/D)
         c1 = 0.5 * ((p1_vars + p2_vars) - beta * (p2_vars - p1_vars))
-        
-        # Aplicar límites (clipping)
+
+        # Validación estricta de límites: no se hace clipping suave.
         min_b = np.array([b[0] for b in bounds])
         max_b = np.array([b[1] for b in bounds])
-        c1 = np.clip(c1, min_b, max_b)
-        
-        # Devolver la nueva solución hija, manteniendo la clase de la entrada
-        return type(parent1)(c1, parent1.objectives.shape[0], parent1.constraints.shape[0])
+        invalid = np.any(c1 < min_b) or np.any(c1 > max_b)
+
+        child = type(parent1)(c1, parent1.objectives.shape[0], parent1.constraints.shape[0])
+        if invalid:
+            child.objectives = np.full(parent1.objectives.shape, np.inf)
+            if child.constraints.shape[0] > 0:
+                child.constraints = np.full(child.constraints.shape, np.inf)
+            setattr(child, '_invalid_genotype', True)
+            return child
+
+        return child

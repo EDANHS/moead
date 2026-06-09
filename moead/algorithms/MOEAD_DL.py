@@ -239,10 +239,13 @@ class MOEAD_DL:
                 child = self.evolutionary_op.execute(
                     i=i, population=self.population, neighborhoods=self.neighborhoods, problem=self.problem
                 )
-                
-                # 2. Evaluar
-                self.problem.evaluate(child)
-                
+
+                # 2. Evaluar sólo si no es una solución inválida detectada en el operador
+                if not getattr(child, '_invalid_genotype', False):
+                    self.problem.evaluate(child)
+                else:
+                    print("    Hijo marcado como inválido por bounds; se omite evaluación de Keras.")
+
                 # 3. Actualizar Z*
                 v_child = np.sum(np.maximum(0, child.constraints))
                 if v_child == 0:

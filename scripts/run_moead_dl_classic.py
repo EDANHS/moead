@@ -202,7 +202,7 @@ def main():
         print(f"FATAL: {e}")
         return
 
-    problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=16,
+    problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=8,
                         patience=args.patience)
     
     scalarization = PBI()

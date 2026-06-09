@@ -62,14 +62,14 @@ class DLProblem(Problem):
             (0.0, len(self.kernel_opts) - 0.01),  # 2: Kernel (2 tamaños: 3x3, 5x5)
             (0.0, len(self.act_opts) - 0.01),     # 3: Activation (5 opciones)
             (0.0, len(self.norm_opts) - 0.01),    # 4: Norm (4: Batch, Layer, Instance, None)
-            (0.0, 0.8),                       # 5: Dropout [0.0 - 0.8]
+            (0.0, 0.7),                       # 5: Dropout [0.0 - 0.7]
             (0.0, len(self.bias_opts) - 0.01),    # 6: Bias
             (0.0, len(self.pool_opts) - 0.01),    # 7: Pooling
             (0.0, len(self.upsample_opts) - 0.01) # 8: UpSample
         ]
         
         self._n_objectives = 2 
-        self._n_constraints = 0
+        self._n_constraints = 1  # Penalización explícita de violaciones de bounds
 
         print("Calculando límites teóricos de parámetros (z_min y z_max)...")
         self.z_min_params, self.z_max_params = self._calculate_param_bounds()
@@ -134,43 +134,45 @@ class DLProblem(Problem):
         }
         return config
 
+    def _is_within_bounds(self, variables: np.ndarray) -> bool:
+        vars_arr = np.asarray(variables)
+        min_b = np.asarray([b[0] for b in self.bounds])
+        max_b = np.asarray([b[1] for b in self.bounds])
+        return not (np.any(vars_arr < min_b) or np.any(vars_arr > max_b))
+
     def _create_dataset(self, x, y, is_training=True):
-        # Implementación segura para mmap: creamos un dataset de índices y
-        # cargamos muestras bajo demanda usando tf.py_function. Evita
-        # materializar el dataset completo en RAM (no usar dataset.cache()).
-        n = len(x)
-        indices = np.arange(n)
+        """
+        Eager loading: materializa arrays en RAM y crea pipeline estándar.
+        Evita complejidad de tf.py_function y sus picos de memoria en GPU.
+        """
+        # Eager conversion to float32 (already done in runners, but ensure it here)
+        x = np.asarray(x, dtype=np.float32)
+        y = np.asarray(y, dtype=np.float32)
 
-        ds = tf.data.Dataset.from_tensor_slices(indices)
+        ds = tf.data.Dataset.from_tensor_slices((x, y))
         if is_training:
-            ds = ds.shuffle(buffer_size=min(1024, n))
-
-        def _load_by_index(i):
-            # i: scalar tf.Tensor
-            def _read(idx):
-                xi = np.asarray(x[int(idx)], dtype=np.float32)
-                yi = np.asarray(y[int(idx)], dtype=np.float32)
-                return xi, yi
-
-            xi, yi = tf.py_function(_read, [i], Tout=(tf.float32, tf.float32))
-            xi.set_shape(self.input_shape)
-            yi.set_shape(self.input_shape)
-            return xi, yi
-
-        # Reduce parallelism and prefetch to avoid GPU memory spikes during
-        # the py_function -> Tensor copy. Small num_parallel_calls and
-        # prefetch=1 minimize concurrent tensors in flight.
-        ds = ds.map(_load_by_index, num_parallel_calls=1)
+            ds = ds.shuffle(buffer_size=min(512, len(x)))
+        
         ds = ds.batch(self.batch_size)
-        ds = ds.prefetch(1)
+        ds = ds.prefetch(tf.data.AUTOTUNE)
         return ds
 
     def evaluate(self, solution):
-        # Limpieza agresiva antes de empezar
+        # Limpieza agresiva ANTES de empezar
         K.clear_session()
+        gc.collect()
+        tf.keras.backend.clear_session()
         gc.collect()
 
         try:
+            if not self._is_within_bounds(solution.variables):
+                print("    Arquitectura inválida: genotipo fuera de límites. Penalizando sin instanciar modelo.")
+                solution.objectives = np.full(self.n_objectives, np.inf)
+                if self.n_constraints > 0:
+                    solution.constraints = np.full(self.n_constraints, np.inf)
+                solution.model_config = {'invalid_genotype': True}
+                return
+
             config = self.decode_solution(solution.variables)
             solution.model_config = config
             print(f"\n--> Evaluando arquitectura: {config}")
@@ -183,54 +185,59 @@ class DLProblem(Problem):
                 optimizer='adam', 
                 loss=dice_loss, 
                 metrics=[dice_coefficient], 
-                jit_compile=False   # Asegúrate que esto esté en False
+                jit_compile=False
             )
 
-            # --- PREPARACIÓN DE DATOS (PIPELINE) ---
+            # --- PREPARACIÓN DE DATOS (PIPELINE EAGER) ---
             train_ds = self._create_dataset(self.X_train, self.Y_train, is_training=True)
             val_ds = self._create_dataset(self.X_val, self.Y_val, is_training=False)
 
             # --- ENTRENAMIENTO ---
-            # Corregido: Monitor 'val_loss' (min) en lugar de 'val_dice' (min)
             callbacks = []
-
             if self.patience > 0:
                 stopper = EarlyStopping(monitor='val_loss', patience=self.patience, mode='min', restore_best_weights=True)
                 callbacks.append(stopper)
 
             history = model.fit(
-                train_ds,          # Usamos el pipeline, no numpy directo
+                train_ds,
                 validation_data=val_ds,
                 epochs=self.epochs,
                 callbacks=callbacks,
-                verbose=1          # Cambiado a 1 para debug de OOM
+                verbose=1
             )
 
             # --- CÁLCULO DE OBJETIVOS ---
-            # Usamos el mejor Dice logrado (max)
             val_dice_scores = history.history['val_dice_coefficient']
-            best_val_dice = max(val_dice_scores)
-            obj_dice_loss = 1.0 - best_val_dice
+            best_val_dice = float(max(val_dice_scores))
+            obj_dice_loss = float(1.0 - best_val_dice)
 
             raw_params = model.count_params()
-            obj_params_norm = (float(raw_params) - self.z_min_params) / (self.z_max_params - self.z_min_params)
-            obj_params_norm = np.clip(obj_params_norm, 0.0, 1.0)
+            obj_params_norm = float((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params))
+            obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
 
             print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f}")
 
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
-            print(f"    OOM detectado: {str(e)} - Penalizando.")
+            print(f"    OOM detectado: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         except Exception as e:
-            print(f"    Error general: {str(e)} - Penalizando.")
+            print(f"    Error general: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         finally:
             # Destrucción total del modelo para liberar VRAM
             if 'model' in locals():
                 del model
+            if 'train_ds' in locals():
+                del train_ds
+            if 'val_ds' in locals():
+                del val_ds
+            
+            # Limpieza agresiva DESPUÉS de terminar
             K.clear_session()
+            tf.keras.backend.clear_session()
             gc.collect()
+            gc.collect()  # Double gc.collect() para asegurar

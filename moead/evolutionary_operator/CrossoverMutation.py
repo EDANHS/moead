@@ -43,5 +43,15 @@ class CrossoverMutation(EvolutionaryOperator):
         # 2. Generar Hijo
         child = self.crossover_op.execute(parent1, parent2, problem.bounds)
         child = self.mutation_op.execute(child, problem.bounds)
-        
+
+        # Validación post-mutation: si el fenotipo viola bounds, penalizamos sin evaluar.
+        vars_arr = np.asarray(child.variables)
+        min_b = np.asarray([b[0] for b in problem.bounds])
+        max_b = np.asarray([b[1] for b in problem.bounds])
+        if np.any(vars_arr < min_b) or np.any(vars_arr > max_b):
+            child.objectives = np.full(child.objectives.shape, np.inf)
+            if child.constraints.shape[0] > 0:
+                child.constraints = np.full(child.constraints.shape, np.inf)
+            setattr(child, '_invalid_genotype', True)
+
         return child
