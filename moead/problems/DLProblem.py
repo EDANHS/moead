@@ -1,6 +1,9 @@
 import gc
+import json
 import numpy as np
 import tensorflow as tf
+from pathlib import Path
+from datetime import datetime
 from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras import mixed_precision
@@ -9,6 +12,7 @@ from moead.models import build_unet
 from moead.solutions import DLSolution
 from moead.problems import Problem
 from moead.utils import dice_coefficient, dice_loss
+from moead.utils.StepDebugger import StepDebugger
 
 class DLProblem(Problem):
     """
@@ -70,6 +74,11 @@ class DLProblem(Problem):
         
         self._n_objectives = 2 
         self._n_constraints = 1  # Penalización explícita de violaciones de bounds
+        self.max_trainable_params = 25_000_000  # Umbral duro para evitar OOM de topologías enormes
+
+        debug_dir = Path.cwd() / 'debug'
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        self.debugger = StepDebugger(debug_dir / f'debug_trace_{datetime.now():%Y%m%d_%H%M%S}.json')
 
         print("Calculando límites teóricos de parámetros (z_min y z_max)...")
         self.z_min_params, self.z_max_params = self._calculate_param_bounds()
@@ -151,10 +160,10 @@ class DLProblem(Problem):
 
         ds = tf.data.Dataset.from_tensor_slices((x, y))
         if is_training:
-            ds = ds.shuffle(buffer_size=min(512, len(x)))
-        
+            ds = ds.shuffle(buffer_size=min(128, len(x)))
+
         ds = ds.batch(self.batch_size)
-        ds = ds.prefetch(tf.data.AUTOTUNE)
+        ds = ds.prefetch(1)  # Minimiza la memoria en vuelo en lugar de AUTOTUNE
         return ds
 
     def evaluate(self, solution):
@@ -165,21 +174,41 @@ class DLProblem(Problem):
         gc.collect()
 
         try:
+            self.debugger.start_step('evaluate_solution', {
+                'variables': solution.variables.tolist() if isinstance(solution.variables, np.ndarray) else solution.variables,
+                'n_objectives': self.n_objectives,
+                'n_constraints': self.n_constraints,
+            })
+
             if not self._is_within_bounds(solution.variables):
+                self.debugger.fail_step('bounds_check', 'invalid genotype', message='Genotipo fuera de límites de bounds')
                 print("    Arquitectura inválida: genotipo fuera de límites. Penalizando sin instanciar modelo.")
                 solution.objectives = np.full(self.n_objectives, np.inf)
-                if self.n_constraints > 0:
-                    solution.constraints = np.full(self.n_constraints, np.inf)
+                solution.constraints = np.full(self.n_constraints, np.inf)
                 solution.model_config = {'invalid_genotype': True}
+                self.debugger.pass_step('evaluate_solution', message='Evaluación terminada con genotipo inválido')
                 return
 
             config = self.decode_solution(solution.variables)
             solution.model_config = config
             print(f"\n--> Evaluando arquitectura: {config}")
+            self.debugger.start_step('model_build', {'config': config})
 
             # --- CONSTRUCCIÓN ---
             model = build_unet(self.input_shape, **config)
-            
+            raw_params = model.count_params()
+            self.debugger.pass_step('model_build', {'raw_params': int(raw_params)})
+
+            if raw_params > self.max_trainable_params:
+                self.debugger.fail_step('model_size_guard', f'Arquitectura demasiado grande ({raw_params:,} parámetros)')
+                print(f"    Arquitectura demasiado grande ({raw_params:,} parámetros). Penalizando sin entrenar.")
+                solution.objectives = np.array([1.0, 1.0])
+                solution.constraints = np.full(self.n_constraints, np.inf)
+                del model
+                self.debugger.pass_step('evaluate_solution', message='Evaluación terminada con arquitectura demasiado grande')
+                return
+
+            self.debugger.start_step('model_compile', {'optimizer': 'adam', 'loss': 'dice_loss'})
             # --- COMPILACIÓN ---
             model.compile(
                 optimizer='adam', 
@@ -187,11 +216,15 @@ class DLProblem(Problem):
                 metrics=[dice_coefficient], 
                 jit_compile=False
             )
+            self.debugger.pass_step('model_compile', 'Modelo compilado con éxito')
 
+            self.debugger.start_step('data_pipeline', {'batch_size': self.batch_size, 'train_size': int(len(self.X_train)), 'val_size': int(len(self.X_val))})
             # --- PREPARACIÓN DE DATOS (PIPELINE EAGER) ---
             train_ds = self._create_dataset(self.X_train, self.Y_train, is_training=True)
             val_ds = self._create_dataset(self.X_val, self.Y_val, is_training=False)
+            self.debugger.pass_step('data_pipeline', 'Pipelines de datos creados correctamente')
 
+            self.debugger.start_step('train_start', {'epochs': self.epochs, 'patience': self.patience})
             # --- ENTRENAMIENTO ---
             callbacks = []
             if self.patience > 0:
@@ -205,7 +238,11 @@ class DLProblem(Problem):
                 callbacks=callbacks,
                 verbose=1
             )
+            self.debugger.pass_step('train_start', 'Entrenamiento completado')
 
+            self.debugger.start_step('objectives_compute', {
+                'history_keys': list(history.history.keys())
+            })
             # --- CÁLCULO DE OBJETIVOS ---
             val_dice_scores = history.history['val_dice_coefficient']
             best_val_dice = float(max(val_dice_scores))
@@ -216,14 +253,21 @@ class DLProblem(Problem):
             obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
 
             print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f}")
+            self.debugger.pass_step('objectives_compute', 'Objetivos calculados', {
+                'dice_loss': obj_dice_loss,
+                'params_norm': obj_params_norm,
+            })
 
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
+            self.debugger.pass_step('evaluate_solution', 'Evaluación exitosa')
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+            self.debugger.fail_step('oom_or_internal_error', e, message='OOM o error interno durante evaluación')
             print(f"    OOM detectado: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
         except Exception as e:
+            self.debugger.fail_step('general_error', e, message='Error general durante evaluación')
             print(f"    Error general: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
         
@@ -241,3 +285,4 @@ class DLProblem(Problem):
             tf.keras.backend.clear_session()
             gc.collect()
             gc.collect()  # Double gc.collect() para asegurar
+            self.debugger.pass_step('cleanup', 'Garbage collection completada y sesión Keras liberada')

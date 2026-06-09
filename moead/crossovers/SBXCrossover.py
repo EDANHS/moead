@@ -18,16 +18,26 @@ class SBXCrossover(Crossover):
         self.eta = eta
         self.prob_cross = prob_cross
 
-    def execute(self, parent1: Solution, parent2: Solution, bounds: list) -> Solution:
+    def execute(self, parent1: Solution, parent2: Solution, bounds: list, debugger=None) -> Solution:
         """
         Toma dos padres y devuelve una nueva Solución hija.
         """
         p1_vars = parent1.variables
         p2_vars = parent2.variables
+        if debugger is not None:
+            debugger.start_step('sbx_crossover', {
+                'prob_cross': self.prob_cross,
+                'eta': self.eta,
+                'parent1_variables': p1_vars.tolist(),
+                'parent2_variables': p2_vars.tolist()
+            })
         
         # Si no se aplica el cruce, devolver un clon del primer padre
         if np.random.rand() > self.prob_cross:
-            return type(parent1)(np.copy(p1_vars), parent1.objectives.shape[0], parent1.constraints.shape[0])
+            child = type(parent1)(np.copy(p1_vars), parent1.objectives.shape[0], parent1.constraints.shape[0])
+            if debugger is not None:
+                debugger.pass_step('sbx_crossover', 'No crossover applied, returning clone')
+            return child
 
         # Lógica matemática de SBX
         rand = np.random.random(p1_vars.shape)
@@ -41,6 +51,10 @@ class SBXCrossover(Crossover):
 
         # Generar el hijo (solo usamos uno en MOEA/D)
         c1 = 0.5 * ((p1_vars + p2_vars) - beta * (p2_vars - p1_vars))
+        if debugger is not None:
+            debugger.record_event('sbx_crossover', 'info', 'Child candidate computed', {
+                'child_variables': c1.tolist()
+            })
 
         # Validación estricta de límites: no se hace clipping suave.
         min_b = np.array([b[0] for b in bounds])
@@ -53,6 +67,14 @@ class SBXCrossover(Crossover):
             if child.constraints.shape[0] > 0:
                 child.constraints = np.full(child.constraints.shape, np.inf)
             setattr(child, '_invalid_genotype', True)
+            if debugger is not None:
+                debugger.warning_step('sbx_crossover', 'Child violates bounds after SBX', {
+                    'child_variables': c1.tolist()
+                })
             return child
 
+        if debugger is not None:
+            debugger.pass_step('sbx_crossover', 'SBX crossover completed successfully', {
+                'child_variables': c1.tolist()
+            })
         return child

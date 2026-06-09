@@ -35,10 +35,12 @@ from moead.problems import DLProblem
 def parse_args():
     p = argparse.ArgumentParser(description="Run classic MOEAD_DL without DifferentialEvolution")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
-    p.add_argument('--n_generations', type=int, default=25, help='Generations')
+    p.add_argument('--n_generations', type=int, default=20, help='Generations')
     p.add_argument('--h_divisions', type=int, default=49, help='H divisions (aumentado para espacio expandido)')
     p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
     p.add_argument('--patience', type=int, default=5, help='Epochs de paciencia para early stopping en entrenamiento de')
+    p.add_argument('--epochs', type=int, default=1, help='Número de epochs para entrenar cada arquitectura (útil para pruebas rápidas)')
+    p.add_argument('--batch_size', type=int, default=16, help='Batch size para entrenamiento (útil para pruebas rápidas)')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements')
     p.add_argument('--organo', type=str, default='ctv', help='Órgano a entrenar, usado en nombres de archivo y resultados')
     p.add_argument('--log', type=str, default='classic_moead_dl_log_ctv.json', help='Log file')
@@ -202,7 +204,9 @@ def main():
         print(f"FATAL: {e}")
         return
 
-    problem = DLProblem(X_train, Y_train, X_val, Y_val, batch_size=8,
+    problem = DLProblem(X_train, Y_train, X_val, Y_val, 
+                        batch_size=args.batch_size,
+                        epochs=args.epochs,
                         patience=args.patience)
     
     scalarization = PBI()

@@ -25,8 +25,17 @@ class CrossoverMutation(EvolutionaryOperator):
                 population: list[Solution], 
                 neighborhoods: np.ndarray, 
                 problem: Problem,
+                debugger=None,
                 **kwargs) -> Solution:
         
+        debug_context = {
+            'index': i,
+            'mating_prob': self.mating_prob,
+            'population_size': len(population)
+        }
+        if debugger is not None:
+            debugger.start_step('offspring_generation', debug_context)
+
         # 1. Selección de Padres Híbrida
         if np.random.rand() < self.mating_prob:
             # Explotación (Vecindario)
@@ -39,9 +48,16 @@ class CrossoverMutation(EvolutionaryOperator):
             
         parent1 = population[parent_indices[0]]
         parent2 = population[parent_indices[1]]
+        if debugger is not None:
+            debugger.record_event('offspring_generation', 'info', 'Selected parents', {
+                'parent_indices': parent_indices.tolist(),
+            })
         
         # 2. Generar Hijo
-        child = self.crossover_op.execute(parent1, parent2, problem.bounds)
+        child = self.crossover_op.execute(
+            parent1, parent2, problem.bounds,
+            debugger=debugger if debugger is not None else None
+        )
         child = self.mutation_op.execute(child, problem.bounds)
 
         # Validación post-mutation: si el fenotipo viola bounds, penalizamos sin evaluar.
@@ -53,5 +69,13 @@ class CrossoverMutation(EvolutionaryOperator):
             if child.constraints.shape[0] > 0:
                 child.constraints = np.full(child.constraints.shape, np.inf)
             setattr(child, '_invalid_genotype', True)
+            if debugger is not None:
+                debugger.warning_step('offspring_generation', 'Hijo inválido después de mutación', {
+                    'variables': vars_arr.tolist()
+                })
+        elif debugger is not None:
+            debugger.pass_step('offspring_generation', 'Offspring generation completed successfully', {
+                'child_variables': vars_arr.tolist()
+            })
 
         return child

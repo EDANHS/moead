@@ -237,7 +237,9 @@ class MOEAD_DL:
 
                 # 1. Generar Hijo
                 child = self.evolutionary_op.execute(
-                    i=i, population=self.population, neighborhoods=self.neighborhoods, problem=self.problem
+                    i=i, population=self.population, neighborhoods=self.neighborhoods,
+                    problem=self.problem,
+                    debugger=getattr(self.problem, 'debugger', None)
                 )
 
                 # 2. Evaluar sólo si no es una solución inválida detectada en el operador
