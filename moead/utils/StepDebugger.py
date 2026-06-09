@@ -2,6 +2,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+
 
 class StepDebugger:
     """
@@ -36,9 +38,30 @@ class StepDebugger:
             except Exception:
                 self._save()
 
+    def _json_safe(self, obj):
+        if isinstance(obj, dict):
+            return {str(k): self._json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [self._json_safe(v) for v in obj]
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, Path):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            return obj.decode('utf-8', 'replace')
+        return obj
+
     def _save(self):
         with open(self.filename, 'w', encoding='utf-8') as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
+            json.dump(self._json_safe(self.data), f, indent=2, ensure_ascii=False)
 
     def _record(self, step: str, event_type: str, status: str, message: str | None = None, context: dict | None = None, error: str | None = None):
         now = datetime.now().isoformat()

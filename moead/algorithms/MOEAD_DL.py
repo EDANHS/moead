@@ -74,6 +74,21 @@ class MOEAD_DL:
         distances = cdist(self.lambda_vectors, self.lambda_vectors, 'euclidean')
         return np.argsort(distances, axis=1)[:, :self.n_neighbors]
 
+    def _make_json_safe(self, obj):
+        if isinstance(obj, dict):
+            return {str(k): self._make_json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [self._make_json_safe(v) for v in obj]
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        return obj
+
     def fitness(self, solution, lambda_vec: np.ndarray) -> float:
         return self.scalarization_op.execute(solution, lambda_vec, self.z_star)
 
@@ -128,7 +143,7 @@ class MOEAD_DL:
 
             # Intentamos añadir historial si existe
             if hasattr(self.history, 'get_history'):
-                 summary['history'] = self.history.get_history()
+                 summary['history'] = self._make_json_safe(self.history.get_history())
 
             # Escribir el archivo JSON
             json_path = f"{self.checkpoint_file}.json"
