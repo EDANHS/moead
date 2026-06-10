@@ -19,6 +19,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'    # Previene el secuestro absoluto de VRAM
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'        # Fuerza el crecimiento elástico
+os.environ['CUDA_CACHE_MAXSIZE'] = '4294967296'         # 4GB de caché para evitar recompilar PTX
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'                # Silencia advertencias C++ no críticas
+
 CURRENT_SCRIPT = Path(__file__).resolve()
 PROJECT_ROOT = CURRENT_SCRIPT.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -39,8 +44,8 @@ def parse_args():
     p.add_argument('--h_divisions', type=int, default=49, help='H divisions (aumentado para espacio expandido)')
     p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
     p.add_argument('--patience', type=int, default=5, help='Epochs de paciencia para early stopping en entrenamiento de')
-    p.add_argument('--epochs', type=int, default=1, help='Número de epochs para entrenar cada arquitectura (útil para pruebas rápidas)')
-    p.add_argument('--batch_size', type=int, default=16, help='Batch size para entrenamiento (útil para pruebas rápidas)')
+    p.add_argument('--epochs', type=int, default=20, help='Número de epochs para entrenar cada arquitectura (útil para pruebas rápidas)')
+    p.add_argument('--batch_size', type=int, default=4, help='Batch size para entrenamiento (útil para pruebas rápidas)')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements')
     p.add_argument('--organo', type=str, default='ctv', help='Órgano a entrenar, usado en nombres de archivo y resultados')
     p.add_argument('--log', type=str, default='classic_moead_dl_log_ctv.json', help='Log file')
@@ -83,20 +88,28 @@ def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.
     path_x = data_dir / f'X_train_{organo}_5k.npy'
     path_y = data_dir / f'Y_train_{organo}_5k.npy'
 
-    print(f"--> Cargando datos desde: {data_dir}")
+    print(f"--> Cargando datos diferidos desde: {data_dir}")
 
     if not path_x.exists() or not path_y.exists():
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
     try:
-        X = np.load(path_x).astype(np.float32)
-        Y = np.load(path_y).astype(np.float32)
-        print(f"--> Datos cargados y convertidos a float32. Shape X: {X.shape}")
+        # Carga por mapeo de memoria: 0 impacto inicial en RAM del sistema
+        X_mmap = np.load(path_x, mmap_mode='r')
+        Y_mmap = np.load(path_y, mmap_mode='r')
+        print(f"--> Vistas de memoria creadas. Shape X: {X_mmap.shape}")
     except Exception as e:
-        raise RuntimeError(f"Error cargando .npy: {e}")
+        raise RuntimeError(f"Error mapeando .npy: {e}")
 
-    X_t, X_v, Y_t, Y_v = train_test_split(X, Y, test_size=0.2, random_state=42)
-    del X, Y
+    # Separación por índices: No duplicamos los datos en memoria
+    indices = np.arange(len(X_mmap))
+    idx_train, idx_val = train_test_split(indices, test_size=0.2, random_state=42)
+
+    X_t = X_mmap[idx_train]
+    Y_t = Y_mmap[idx_train]
+    X_v = X_mmap[idx_val]
+    Y_v = Y_mmap[idx_val]
+
     return X_t, Y_t, X_v, Y_v
 
 
