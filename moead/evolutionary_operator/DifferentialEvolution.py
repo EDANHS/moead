@@ -53,13 +53,25 @@ class DifferentialEvolution(EvolutionaryOperator):
         
         # --- 2. Lógica DE (Sin cambios) ---
         
-        # b) Vector Mutante
         bounds = problem.bounds
         min_b = np.array([b[0] for b in bounds])
         max_b = np.array([b[1] for b in bounds])
         
-        v = x_r1 + self.F * (x_r2 - x_r3)
-        v = np.clip(v, min_b, max_b) # Reparación
+        # a) Calcular la diferencia pura entre los donantes
+        diff = x_r2 - x_r3
+        
+        # b) Aplicar el factor F y redondear al entero más cercano
+        scaled_diff = self.F * diff
+        mut_step = np.round(scaled_diff)
+        
+        # c) REFUERZO DE INERCIA MÍNIMA: 
+        # Si había diferencia entre los padres, pero el factor F la redujo a 0,
+        # forzamos un salto mínimo de magnitud 1 en la dirección original.
+        mut_step = np.where((diff != 0) & (mut_step == 0), np.sign(diff), mut_step)
+
+        # d) Generar vector mutante discreto y reparar límites
+        v = x_r1 + mut_step
+        v = np.clip(v, min_b, max_b)
 
         # c) Cruce Binomial
         n_vars = len(x_i)

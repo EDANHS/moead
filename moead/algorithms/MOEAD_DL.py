@@ -213,7 +213,7 @@ class MOEAD_DL:
                 sol = self.problem.create_solution() 
                 self.problem.evaluate(sol)
                 self.population.append(sol)
-                self.archive.add(sol)
+                self.archive.add(sol.clone(keep_performance=True))
                 
                 # Actualizar Z*
                 v_sol = np.sum(np.maximum(0, sol.constraints))
@@ -269,7 +269,7 @@ class MOEAD_DL:
                     self.z_star = np.minimum(self.z_star, child.objectives)
                 
                 # 4. Archive
-                self.archive.add(child)
+                self.archive.add(child.clone(keep_performance=True))
                 
                 # 5. Vecindario
                 shuffled_neighbors = np.random.permutation(self.neighborhoods[i])
@@ -292,7 +292,7 @@ class MOEAD_DL:
                         if v_child < v_neighbor: is_better = True
 
                     if is_better:
-                        self.population[j] = child
+                        self.population[j] = child.clone(keep_performance=True)
                         replaced_count += 1
             
             # Logs y Checkpoint por generación

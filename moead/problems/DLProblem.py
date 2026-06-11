@@ -2,6 +2,7 @@ import gc
 import json
 import numpy as np
 import tensorflow as tf
+import time
 from pathlib import Path
 from datetime import datetime
 from tensorflow.keras import backend as K
@@ -177,32 +178,33 @@ class DLProblem(Problem):
                 'variables': solution.variables.tolist() if isinstance(solution.variables, np.ndarray) else solution.variables,
             })
 
-            # FASE 1: BARRERA GENOTÍPICA
+            # FASE 1: BARRERA GENOTÍPICA (Fail-safe)
             if not self._is_within_bounds(solution.variables):
-                print("    Arquitectura inválida: genotipo fuera de límites. Penalizando.")
+                print("    [WARN] Arquitectura inválida interceptada en el fail-safe. Penalizando.")
                 solution.objectives = np.full(self.n_objectives, np.inf)
                 solution.constraints = np.full(self.n_constraints, np.inf)
-                solution.model_config = {'invalid_genotype': True}
+                # Uso del flag oficial de la nueva DLSolution
+                solution._invalid_genotype = True 
                 return
 
             config = self.decode_solution(solution.variables)
-            solution.model_config = config
             print(f"\n--> Evaluando arquitectura: {config}")
             
             # --- CONSTRUCCIÓN ---
             model = build_unet(self.input_shape, **config)
             raw_params = model.count_params()
 
-            # FASE 1: PENA DE MUERTE POR COMPLEJIDAD PARAMÉTRICA
+            # FASE 2: PENA DE MUERTE POR COMPLEJIDAD PARAMÉTRICA
             if raw_params > self.max_trainable_params:
                 print(f"    Arquitectura demasiado masiva ({raw_params:,} > {self.max_trainable_params:,}). Evitando OOM y penalizando.")
-                solution.objectives = np.array([1.0, 1.0]) # Peor métrica posible
+                solution.objectives = np.array([1.0, 1.0]) 
                 solution.constraints = np.full(self.n_constraints, np.inf)
+                # Guardamos la configuración para que el JSON sepa qué falló
+                solution.set_metadata(config=config)
                 del model
                 return
 
-            # FASE 2: MOTOR DE ACUMULACIÓN DE GRADIENTES
-            # Logra un lote efectivo de 16 (4 de batch * 4 pasos de acumulación)
+            # FASE 3: MOTOR DE ACUMULACIÓN DE GRADIENTES
             optimizador_acumulativo = tf.keras.optimizers.Adam(
                 learning_rate=0.001,
                 gradient_accumulation_steps=4  
@@ -211,56 +213,71 @@ class DLProblem(Problem):
             model.compile(
                 optimizer=optimizador_acumulativo, 
                 loss=dice_loss, 
+                # Asegúrate de que el nombre coincida exactamente con lo que reporta Keras en el history
                 metrics=[dice_coefficient], 
                 jit_compile=False
             )
 
-            # FASE 3: PIPELINES ASIMÉTRICOS (Train = 4, Val = 8)
             train_ds = self._create_dataset(self.X_train, self.Y_train, custom_batch_size=self.train_batch_size, is_training=True)
             val_ds = self._create_dataset(self.X_val, self.Y_val, custom_batch_size=self.val_batch_size, is_training=False)
 
-            # --- ENTRENAMIENTO ---
+            # --- ENTRENAMIENTO CON TELEMETRÍA ---
             callbacks = []
             if self.patience > 0:
                 stopper = EarlyStopping(monitor='val_loss', patience=self.patience, mode='min', restore_best_weights=True)
                 callbacks.append(stopper)
 
+            # Cronómetro de entrenamiento
+            start_time = time.time()
+            
             history = model.fit(
                 train_ds,
-                validation_data=val_ds, # Val evalúa usando el pipeline de lote=8 de forma nativa
+                validation_data=val_ds, 
                 epochs=self.epochs,
                 callbacks=callbacks,
                 verbose=1
             )
+            
+            # Registrar tiempo total en segundos
+            elapsed_time = time.time() - start_time
 
             # --- CÁLCULO DE OBJETIVOS ---
-            val_dice_scores = history.history['val_dice_coefficient']
+            # Precaución: Verifica que 'val_dice_coefficient' sea el nombre exacto que arroja tu consola.
+            # A veces Keras lo nombra solo 'val_dice' dependiendo de cómo importaste la función.
+            val_dice_scores = history.history['val_dice_coefficient'] 
             best_val_dice = float(max(val_dice_scores))
             obj_dice_loss = float(1.0 - best_val_dice)
 
             obj_params_norm = float((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params))
             obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
 
-            print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f}")
+            print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Tiempo: {elapsed_time:.1f}s")
 
+            # Asignación segura de estado
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
+            
+            # Inyección de toda la telemetría usando el método encapsulado
+            solution.set_metadata(
+                config=config, 
+                training_time=elapsed_time,
+                epoch=len(val_dice_scores) # Cuántas épocas duró realmente antes del Early Stopping
+            )
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
             print(f"    OOM imprevisto en tiempo de ejecución. Penalizando arquitectura.")
             solution.objectives = np.array([1.0, 1.0])
+            if 'config' in locals(): solution.set_metadata(config=config)
         
         except Exception as e:
             print(f"    Error general: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
+            if 'config' in locals(): solution.set_metadata(config=config)
         
         finally:
-            # FASE 3: PURGA ABSOLUTA DE MEMORIA Y DESTRUCCIÓN DEL GRAFO
-            if 'model' in locals():
-                del model
-            if 'train_ds' in locals():
-                del train_ds
-            if 'val_ds' in locals():
-                del val_ds
+            # FASE 4: PURGA ABSOLUTA
+            if 'model' in locals(): del model
+            if 'train_ds' in locals(): del train_ds
+            if 'val_ds' in locals(): del val_ds
             
             K.clear_session()
             gc.collect()

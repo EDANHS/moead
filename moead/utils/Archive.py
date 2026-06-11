@@ -59,7 +59,7 @@ class Archive:
             del self.solutions[i]
             
         # 4. Añadir la nueva solución (factible y no dominada)
-        self.solutions.append(new_solution)
+        self.solutions.append(new_solution.clone(keep_performance=True))
         
         # 5. Podar el archivo si excede el tamaño máximo
         if self.max_size is not None and len(self.solutions) > self.max_size:
