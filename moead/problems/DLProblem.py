@@ -52,10 +52,10 @@ class DLProblem(Problem):
         mixed_precision.set_global_policy('mixed_float16')
         
         # 2. Definir los Espacios de Búsqueda (OPTIMIZADO)
-        self.filters_opts = [i for i in range(2, 49, 2)] # Máximo 48 filtros iniciales
+        self.filters_opts = [i for i in range(2, 65, 2)] # Máximo 48 filtros iniciales
         # Dropout discretizado de 0.0 a 0.5 en saltos de 0.05
         self.dropouts_opts = [round(i * 0.05, 2) for i in range(11)] 
-        self.kernel_opts = [(1,1), (3,3)] # Excluimos (5,5) por ineficiencia paramétrica
+        self.kernel_opts = [(1,1), (3,3), (5,5)] # Excluimos (5,5) por ineficiencia paramétrica
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None'] 
         self.pool_opts = ['Max', 'Average']
@@ -64,7 +64,7 @@ class DLProblem(Problem):
         
         # 3. Definir los Bounds Numéricos para DE
         self._bounds = [
-            (1.0, 4.99),                      # 0: Depth [1-4] (Bajado para evitar monstruos)
+            (1.0, 5.99),                      # 0: Depth [1-5] (Bajado para evitar monstruos)
             (0.0, len(self.filters_opts) - 0.01), # 1: Filters 
             (0.0, len(self.kernel_opts) - 0.01),  # 2: Kernel 
             (0.0, len(self.act_opts) - 0.01),     # 3: Activation
