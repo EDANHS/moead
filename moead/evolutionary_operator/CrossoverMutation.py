@@ -36,31 +36,47 @@ class CrossoverMutation(EvolutionaryOperator):
         if debugger is not None:
             debugger.start_step('offspring_generation', debug_context)
 
-        # 1. Selección de Padres Híbrida
+        # 1. SELECCIÓN DE PADRES HÍBRIDA CON SALVAGUARDAS DE MUESTREO
         if np.random.rand() < self.mating_prob:
-            # Explotación (Vecindario)
+            # --- FLUJO DE EXPLOTACIÓN (Vecindario) ---
             p_indices = neighborhoods[i]
-            parent_indices = np.random.choice(p_indices, 2, replace=False)
-        else:
-            # Exploración (Global)
-            n_pop = len(population)
-            parent_indices = np.random.choice(n_pop, 2, replace=False)
             
+            # CONTROL DE BORDE: Vecindario demasiado pequeño para muestreo sin reemplazo
+            if len(p_indices) < 2:
+                p_indices = np.arange(len(population))
+            
+            # Si incluso la población global es insuficiente (caso pop=1 en pruebas)
+            if len(p_indices) < 2:
+                # Muestreo con reemplazo forzado: el único individuo disponible se cruzará consigo mismo
+                parent_indices = np.random.choice(p_indices, 2, replace=True)
+            else:
+                parent_indices = np.random.choice(p_indices, 2, replace=False)
+        else:
+            # --- FLUJO DE EXPLORACIÓN (Global) ---
+            n_pop = len(population)
+            
+            # CONTROL DE BORDE: Población global insuficiente para muestreo sin reemplazo
+            if n_pop < 2:
+                parent_indices = np.random.choice(n_pop, 2, replace=True)
+            else:
+                parent_indices = np.random.choice(n_pop, 2, replace=False)
+                
         parent1 = population[parent_indices[0]]
         parent2 = population[parent_indices[1]]
+        
         if debugger is not None:
             debugger.record_event('offspring_generation', 'info', 'Selected parents', {
                 'parent_indices': parent_indices.tolist(),
             })
         
-        # 2. Generar Hijo
+        # 2. Generar Hijo (Continúa el flujo normal sin alteraciones)
         child = self.crossover_op.execute(
             parent1, parent2, problem.bounds,
             debugger=debugger if debugger is not None else None
         )
         child = self.mutation_op.execute(child, problem.bounds)
 
-        # Validación post-mutation: si el fenotipo viola bounds, penalizamos sin evaluar.
+        # Validación post-mutation
         vars_arr = np.asarray(child.variables)
         min_b = np.asarray([b[0] for b in problem.bounds])
         max_b = np.asarray([b[1] for b in problem.bounds])
