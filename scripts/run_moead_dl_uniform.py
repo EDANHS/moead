@@ -1,8 +1,9 @@
 """
-Runner clásico de MOEAD_DL sin DifferentialEvolution.
+Runner Discreto de MOEAD_DL optimizado para NAS.
 
-Este script usa la reproducción clásica de MOEA/D basada en SBX + mutación
-polinómica (clásico) y guarda metadata estructurada sobre la ejecución.
+Este script utiliza la reproducción de MOEA/D basada en Cruce Uniforme 
+(UniformCrossover) y Mutación Uniforme Acotada, operando bajo la 
+escalarización de Tchebycheff con corrección asintótica para espacios discretos.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -28,29 +30,30 @@ CURRENT_SCRIPT = Path(__file__).resolve()
 PROJECT_ROOT = CURRENT_SCRIPT.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Redirigir importaciones a la raíz del proyecto
+# Importaciones ajustadas a la nueva arquitectura geométrica discreta
 from moead.algorithms import MOEAD_DL
-from moead.crossovers import SBXCrossover
-from moead.evolutionary_operator.CrossoverMutation import CrossoverMutation
-from moead.mutations.PolynomialMutation import PolynomialMutation
-from moead.scalarizations import PBI
+from moead.crossovers import UniformCrossover
+# Asegúrate de ajustar la ruta de importación de tu mutación acotada según tu directorio
+from moead.mutations import BoundedUniformMutation 
+from moead.evolutionary_operator import CrossoverMutation
+from moead.scalarizations import Tchebycheff
 from moead.problems import DLProblem
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Run classic MOEAD_DL without DifferentialEvolution")
+    p = argparse.ArgumentParser(description="Run MOEAD_DL with Discrete Uniform Operators for NAS")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
     p.add_argument('--n_generations', type=int, default=20, help='Generations')
-    p.add_argument('--h_divisions', type=int, default=49, help='H divisions (aumentado para espacio expandido)')
+    p.add_argument('--h_divisions', type=int, default=49, help='H divisions para vectores lambda')
     p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
-    p.add_argument('--patience', type=int, default=5, help='Epochs de paciencia para early stopping en entrenamiento de')
-    p.add_argument('--epochs', type=int, default=20, help='Número de epochs para entrenar cada arquitectura (útil para pruebas rápidas)')
-    p.add_argument('--batch_size', type=int, default=4, help='Batch size para entrenamiento (útil para pruebas rápidas)')
-    p.add_argument('--n_r', type=int, default=2, help='Max replacements')
-    p.add_argument('--organo', type=str, default='ctv', help='Órgano a entrenar, usado en nombres de archivo y resultados')
-    p.add_argument('--log', type=str, default='classic_moead_dl_log_ctv.json', help='Log file')
-    p.add_argument('--checkpoint', type=str, default='classic_moead_dl_checkpoint_ctv.pkl', help='Checkpoint')
-    p.add_argument('--output-metadata', type=str, default='classic_moead_dl_metadata.json', help='Metadata JSON output file')
+    p.add_argument('--patience', type=int, default=5, help='Paciencia para early stopping')
+    p.add_argument('--epochs', type=int, default=20, help='Número máximo de epochs por arquitectura')
+    p.add_argument('--batch_size', type=int, default=4, help='Batch size físico para entrenamiento (VRAM control)')
+    p.add_argument('--n_r', type=int, default=2, help='Max replacements en vecindario')
+    p.add_argument('--organo', type=str, default='ctv', help='Órgano objetivo de segmentación')
+    p.add_argument('--log', type=str, default='uniform_moead_dl_log_ctv.json', help='Log file')
+    p.add_argument('--checkpoint', type=str, default='uniform_moead_dl_checkpoint_ctv.pkl', help='Checkpoint')
+    p.add_argument('--output-metadata', type=str, default='uniform_moead_dl_metadata.json', help='Metadata JSON output file')
     return p.parse_args()
 
 
@@ -60,14 +63,9 @@ def configure_device(use_gpu: bool):
         try:
             import tensorflow as tf
 
-            # ---------------------------------------------------------
             # PARCHE ESTRUCTURAL: DESACTIVAR LAYOUT OPTIMIZER
-            # Previene el colapso (INVALID_ARGUMENT: Size of values 0)
-            # al evaluar arquitecturas dinámicas con Dropout y sin sesgo.
-            # ---------------------------------------------------------
             tf.config.optimizer.set_experimental_options({'layout_optimizer': False})
 
-            # Limitar la VRAM para que TF no la acapare toda de golpe
             gpus = tf.config.list_physical_devices('GPU')
             for gpu in gpus:
                 try:
@@ -77,7 +75,7 @@ def configure_device(use_gpu: bool):
                     
         except ImportError:
             pass
-        print("--> GPU enabled (Layout Optimizer Desactivado para Estabilidad)")
+        print("--> GPU enabled (Layout Optimizer Desactivado para Estabilidad de Grafos Dinámicos)")
     else:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''
         print("--> GPU disabled, using CPU")
@@ -94,14 +92,12 @@ def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
     try:
-        # Carga por mapeo de memoria: 0 impacto inicial en RAM del sistema
         X_mmap = np.load(path_x, mmap_mode='r')
         Y_mmap = np.load(path_y, mmap_mode='r')
         print(f"--> Vistas de memoria creadas. Shape X: {X_mmap.shape}")
     except Exception as e:
         raise RuntimeError(f"Error mapeando .npy: {e}")
 
-    # Separación por índices: No duplicamos los datos en memoria
     indices = np.arange(len(X_mmap))
     idx_train, idx_val = train_test_split(indices, test_size=0.2, random_state=42)
 
@@ -123,7 +119,7 @@ def plot_front(archive, out_path: Path):
     plt.scatter(f1, f2, s=20, c='blue', alpha=0.6)
     plt.xlabel('Dice Loss (Minimizar)')
     plt.ylabel('Norm Params (Minimizar)')
-    plt.title(f'MOEAD-DL Clásico Pareto Front ({len(archive)} soluciones)')
+    plt.title(f'MOEAD-DL Pareto Front Discreto ({len(archive)} soluciones)')
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.savefig(out_path)
@@ -156,7 +152,7 @@ def plot_history(history: dict, out_path: Path):
         plt.subplot(2, 1, 2)
         plt.plot(gens, archive_sizes, 'r-o', label='Archive Size')
         plt.xlabel('Generación')
-        plt.title('Tamaño del Archivo Externo')
+        plt.title('Tamaño del Archivo Externo de Pareto')
         plt.legend(); plt.grid(True)
 
         plt.tight_layout()
@@ -188,6 +184,8 @@ def save_metadata(
     metadata = {
         'algorithm': 'MOEAD_DL',
         'evolutionary_operator': evo_op.__class__.__name__,
+        'crossover_type': evo_op.crossover_op.__class__.__name__,
+        'mutation_type': evo_op.mutation_op.__class__.__name__,
         'scalarization': scalarization.__class__.__name__,
         'organo': organo,
         'n_generations': moead.n_gen,
@@ -217,29 +215,41 @@ def main():
         print(f"FATAL: {e}")
         return
 
+    # 1. Instanciación del entorno evaluativo (Fenotipo)
     problem = DLProblem(X_train, Y_train, X_val, Y_val,
                         train_batch_size=args.batch_size,
                         val_batch_size=args.batch_size,
                         epochs=args.epochs,
                         patience=args.patience)
     
-    scalarization = PBI()
+    # 2. Heurística de la Tasa de Mutación
+    # Se extrae dinámicamente el número de variables de decisión
+    n_variables = len(problem.bounds)
+    dynamic_mutation_rate = 1.0 / float(n_variables)
+    
+    # 3. Ensamblaje de Operadores Discretos
+    # Tchebycheff asegura contornos ortogonales ideales para el cruce uniforme
+    scalarization = Tchebycheff(epsilon=1e-6)
+    
     evo_op = CrossoverMutation(
-        crossover=SBXCrossover(eta=15.0, prob_cross=0.9),
-        mutation=PolynomialMutation(eta=20.0, prob_mut=None),
+        crossover=UniformCrossover(prob_cross=0.9),
+        mutation=BoundedUniformMutation(prob_mut=dynamic_mutation_rate),
         mating_prob=0.9,
     )
 
-    output_dir = PROJECT_ROOT / f'resultados' / f'resultado_{args.organo}'
+    output_dir = PROJECT_ROOT / 'resultados' / f'resultado_discreto_{args.organo}'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = output_dir / args.log
     checkpoint_path = output_dir / args.checkpoint
     metadata_path = Path(args.output_metadata)
 
-    print(f"--> Iniciando MOEAD_DL clásico: Gens={args.n_generations}, Vecinos={args.n_neighbors}, Órgano={args.organo}")
-    print(f"--> Guardando resultados en: {output_dir}")
+    print(f"\n--> Iniciando MOEAD_DL Discreto (NAS):")
+    print(f"    - Generaciones: {args.n_generations} | Vecinos: {args.n_neighbors} | Órgano: {args.organo}")
+    print(f"    - Cruce: UniformCrossover | Mutación: BoundedUniformMutation (Tasa: {dynamic_mutation_rate:.3f})")
+    print(f"    - Guardando resultados en: {output_dir}\n")
 
+    # 4. Orquestación del Motor Evolutivo
     moead = MOEAD_DL(
         problem=problem,
         scalarization=scalarization,
@@ -256,11 +266,12 @@ def main():
     archive, history = moead.run()
     end_time = time.time()
 
-    plot_front(archive, output_dir / 'classic_moead_dl_front.png')
-    plot_history(history, output_dir / 'classic_moead_dl_history.png')
+    # 5. Generación de Auditoría y Reportes Geométricos
+    plot_front(archive, output_dir / 'uniform_moead_dl_front.png')
+    plot_history(history, output_dir / 'uniform_moead_dl_history.png')
     save_metadata(output_dir, start_time, end_time, moead, scalarization, evo_op, args.organo, metadata_path)
 
-    print(f"--> Ejecución finalizada. Metadata guardada en {output_dir / metadata_path}")
+    print(f"--> Ejecución finalizada con éxito. Metadata guardada en {output_dir / metadata_path}")
 
 
 if __name__ == '__main__':

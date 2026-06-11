@@ -1,6 +1,6 @@
 import numpy as np
 
-from moead.crossovers import Crossover
+from . import Crossover
 from moead.solutions import Solution
 
 

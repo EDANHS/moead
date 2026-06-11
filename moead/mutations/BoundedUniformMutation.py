@@ -1,5 +1,5 @@
 import numpy as np
-from moead.mutations.Mutation import Mutation
+from . import Mutation
 from moead.solutions.Solution import Solution
 
 class BoundedUniformMutation(Mutation):
