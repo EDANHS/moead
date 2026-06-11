@@ -52,7 +52,7 @@ class DLProblem(Problem):
         mixed_precision.set_global_policy('mixed_float16')
         
         # 2. Definir los Espacios de Búsqueda (OPTIMIZADO)
-        self.filters_opts = [i for i in range(2, 65, 2)] # Máximo 48 filtros iniciales
+        self.filters_opts = [i for i in range(2, 65, 2)] # Máximo 64 filtros iniciales
         # Dropout discretizado de 0.0 a 0.5 en saltos de 0.05
         self.dropouts_opts = [round(i * 0.05, 2) for i in range(11)] 
         self.kernel_opts = [(1,1), (3,3), (5,5)] # Excluimos (5,5) por ineficiencia paramétrica
@@ -94,14 +94,14 @@ class DLProblem(Problem):
     def _calculate_param_bounds(self):
         """Calcula min/max params para normalización y establece el techo de seguridad."""
         min_config = {
-            'depth': 1, 'initial_filters': 2, 'kernel_size': (1,1),
+            'depth': 1, 'initial_filters': self.filters_opts[0], 'kernel_size': (1,1),
             'activation_name': 'ReLU', 'norm_type': 'None', 'dropout_rate': 0.0,
             'use_bias': False, 'pooling_type': 'Max', 'upsample_type': 'BilinearUpsample'
         }
 
-        # Configuración máxima teórica permitida en el espacio de búsqueda
+        # Configuración máxima congruente con el nuevo hipercubo expandido
         max_config = {
-            'depth': 4, 'initial_filters': 48, 'kernel_size': (3,3),
+            'depth': 5, 'initial_filters': self.filters_opts[-1], 'kernel_size': (5,5),
             'activation_name': 'Swish', 'norm_type': 'Batch', 'dropout_rate': 0.5,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
@@ -117,7 +117,7 @@ class DLProblem(Problem):
             p_max = m_max.count_params()
             del m_max
         except:
-            p_max = 18_000_000.0 # Fallback de seguridad estricto
+            p_max = 35_000_000.0 # Fallback de seguridad estricto
         K.clear_session()
         gc.collect()
         return float(p_min), float(p_max)
