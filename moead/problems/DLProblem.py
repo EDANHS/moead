@@ -169,7 +169,7 @@ class DLProblem(Problem):
         return ds
 
     def evaluate(self, solution):
-        # Limpieza agresiva ANTES de empezar el ciclo evolutivo
+        # Limpieza agresiva de VRAM y llamadas al recolector antes de compilar
         K.clear_session()
         gc.collect()
 
@@ -183,53 +183,50 @@ class DLProblem(Problem):
                 print("    [WARN] Arquitectura inválida interceptada en el fail-safe. Penalizando.")
                 solution.objectives = np.full(self.n_objectives, np.inf)
                 solution.constraints = np.full(self.n_constraints, np.inf)
-                # Uso del flag oficial de la nueva DLSolution
                 solution._invalid_genotype = True 
                 return
 
             config = self.decode_solution(solution.variables)
             print(f"\n--> Evaluando arquitectura: {config}")
             
-            # --- CONSTRUCCIÓN ---
+            # --- CONSTRUCCIÓN DEL FENOTIPO ---
             model = build_unet(self.input_shape, **config)
             raw_params = model.count_params()
 
-            # FASE 2: PENA DE MUERTE POR COMPLEJIDAD PARAMÉTRICA
+            # FASE 2: BARRERA PARAMÉTRICA DE HARDWARE
             if raw_params > self.max_trainable_params:
-                print(f"    Arquitectura demasiado masiva ({raw_params:,} > {self.max_trainable_params:,}). Evitando OOM y penalizando.")
+                print(f"    Arquitectura demasiado masiva ({raw_params:,}). Evitando OOM y penalizando.")
                 solution.objectives = np.array([1.0, 1.0]) 
                 solution.constraints = np.full(self.n_constraints, np.inf)
-                # Guardamos la configuración para que el JSON sepa qué falló
                 solution.set_metadata(config=config)
                 del model
                 return
 
-            # FASE 3: MOTOR DE ACUMULACIÓN DE GRADIENTES
+            # FASE 3: CONFIGURACIÓN DEL MOTOR DE ACUMULACIÓN
             optimizador_acumulativo = tf.keras.optimizers.Adam(
                 learning_rate=0.001,
-                gradient_accumulation_steps=4  
+                gradient_accumulation_steps=self.train_batch_size  
             )
 
             model.compile(
                 optimizer=optimizador_acumulativo, 
                 loss=dice_loss, 
-                # Asegúrate de que el nombre coincida exactamente con lo que reporta Keras en el history
                 metrics=[dice_coefficient], 
                 jit_compile=False
             )
 
+            # Instanciación de los pipelines base
             train_ds = self._create_dataset(self.X_train, self.Y_train, custom_batch_size=self.train_batch_size, is_training=True)
             val_ds = self._create_dataset(self.X_val, self.Y_val, custom_batch_size=self.val_batch_size, is_training=False)
 
-            # --- ENTRENAMIENTO CON TELEMETRÍA ---
+            # --- ENTRENAMIENTO (Optimización de Pesos Físicos) ---
             callbacks = []
             if self.patience > 0:
+                # El EarlyStopping siempre monitorea el conjunto val_ds intermedio
                 stopper = EarlyStopping(monitor='val_loss', patience=self.patience, mode='min', restore_best_weights=True)
                 callbacks.append(stopper)
 
-            # Cronómetro de entrenamiento
             start_time = time.time()
-            
             history = model.fit(
                 train_ds,
                 validation_data=val_ds, 
@@ -237,47 +234,59 @@ class DLProblem(Problem):
                 callbacks=callbacks,
                 verbose=1
             )
-            
-            # Registrar tiempo total en segundos
             elapsed_time = time.time() - start_time
 
-            # --- CÁLCULO DE OBJETIVOS ---
-            # Precaución: Verifica que 'val_dice_coefficient' sea el nombre exacto que arroja tu consola.
-            # A veces Keras lo nombra solo 'val_dice' dependiendo de cómo importaste la función.
-            val_dice_scores = history.history['val_dice_coefficient'] 
-            best_val_dice = float(max(val_dice_scores))
-            obj_dice_loss = float(1.0 - best_val_dice)
+            # --- FASE 4: BIFURCACIÓN DINÁMICA DE META-VALIDACIÓN ---
+            # Comprobación de las condiciones de contorno de los datos de entrada
+            if self.X_test is not None and self.Y_test is not None:
+                print("    [METODOLOGÍA] X_test detectado. Evaluando sobre el conjunto de Prueba aislado para el fitness de MOEA/D.")
+                eval_ds = self._create_dataset(self.X_test, self.Y_test, custom_batch_size=self.val_batch_size, is_training=False)
+            else:
+                print("    [METODOLOGÍA] X_test es None. Ejecutando fallback: Evaluando sobre el conjunto de Validación (X_val) para el fitness.")
+                eval_ds = val_ds
 
+            # Ejecución de la inferencia determinista final con los mejores pesos restaurados
+            eval_results = model.evaluate(eval_ds, verbose=1)
+            final_val_dice = float(eval_results[1])
+            
+            # El objetivo evolutivo es estrictamente el complemento del coeficiente de Dice
+            obj_dice_loss = float(1.0 - final_val_dice)
+
+            # Normalización lineal del espacio de complejidad paramétrica
             obj_params_norm = float((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params))
             obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
 
             print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Tiempo: {elapsed_time:.1f}s")
 
-            # Asignación segura de estado
+            # Inyección segura de objetivos al genotipo activo
             solution.objectives = np.array([obj_dice_loss, float(obj_params_norm)])
             
-            # Inyección de toda la telemetría usando el método encapsulado
+            # Almacenamiento estructurado de la telemetría generacional
             solution.set_metadata(
                 config=config, 
                 training_time=elapsed_time,
-                epoch=len(val_dice_scores) # Cuántas épocas duró realmente antes del Early Stopping
+                epoch=len(history.history['loss']) 
             )
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
-            print(f"    OOM imprevisto en tiempo de ejecución. Penalizando arquitectura.")
+            print(f"    OOM imprevisto en tiempo de ejecución. Penalizando arquitectura de forma acotada.")
             solution.objectives = np.array([1.0, 1.0])
             if 'config' in locals(): solution.set_metadata(config=config)
         
         except Exception as e:
-            print(f"    Error general: {str(e)[:100]} - Penalizando.")
+            print(f"    Error general en el hilo de evaluación: {str(e)[:100]} - Penalizando.")
             solution.objectives = np.array([1.0, 1.0])
             if 'config' in locals(): solution.set_metadata(config=config)
         
         finally:
-            # FASE 4: PURGA ABSOLUTA
+            # --- FASE 5: PURGA ABSOLUTA DE GRADOS DE LIBERTAD EN VRAM ---
             if 'model' in locals(): del model
             if 'train_ds' in locals(): del train_ds
             if 'val_ds' in locals(): del val_ds
+            
+            # Condición de limpieza: Eliminar eval_ds solo si se instanció como un objeto independiente de val_ds
+            if 'eval_ds' in locals() and eval_ds is not val_ds: 
+                del eval_ds
             
             K.clear_session()
             gc.collect()

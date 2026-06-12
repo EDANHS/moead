@@ -43,7 +43,7 @@ from moead.problems import DLProblem
 def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL with Discrete Uniform Operators for NAS")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
-    p.add_argument('--n_generations', type=int, default=20, help='Generations')
+    p.add_argument('--n_generations', type=int, default=25, help='Generations')
     p.add_argument('--h_divisions', type=int, default=49, help='H divisions para vectores lambda')
     p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
     p.add_argument('--patience', type=int, default=5, help='Paciencia para early stopping')
@@ -81,7 +81,7 @@ def configure_device(use_gpu: bool):
         print("--> GPU disabled, using CPU")
 
 
-def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     data_dir = root_path / 'data'
     path_x = data_dir / f'X_train_{organo}_5k.npy'
     path_y = data_dir / f'Y_train_{organo}_5k.npy'
@@ -99,14 +99,23 @@ def load_data(root_path: Path, organo: str) -> tuple[np.ndarray, np.ndarray, np.
         raise RuntimeError(f"Error mapeando .npy: {e}")
 
     indices = np.arange(len(X_mmap))
-    idx_train, idx_val = train_test_split(indices, test_size=0.2, random_state=42)
+    
+    # SPLIT 1: Extraer el 70% para Entrenamiento
+    idx_train, idx_rest = train_test_split(indices, test_size=0.30, random_state=42)
+    
+    # SPLIT 2: Dividir el 30% restante equitativamente (15% Val / 15% Test)
+    idx_val, idx_test = train_test_split(idx_rest, test_size=0.50, random_state=42)
 
     X_t = X_mmap[idx_train]
     Y_t = Y_mmap[idx_train]
+    
     X_v = X_mmap[idx_val]
     Y_v = Y_mmap[idx_val]
+    
+    X_test = X_mmap[idx_test]
+    Y_test = Y_mmap[idx_test]
 
-    return X_t, Y_t, X_v, Y_v
+    return X_t, Y_t, X_v, Y_v, X_test, Y_test
 
 
 def plot_front(archive, out_path: Path):
@@ -210,13 +219,15 @@ def main():
     configure_device(args.use_gpu)
 
     try:
-        X_train, Y_train, X_val, Y_val = load_data(PROJECT_ROOT, args.organo)
+        # Recepción de las 6 particiones de datos
+        X_train, Y_train, X_val, Y_val, X_test, Y_test = load_data(PROJECT_ROOT, args.organo)
     except Exception as e:
         print(f"FATAL: {e}")
         return
 
     # 1. Instanciación del entorno evaluativo (Fenotipo)
     problem = DLProblem(X_train, Y_train, X_val, Y_val,
+                        X_test=X_test, Y_test=Y_test,
                         train_batch_size=args.batch_size,
                         val_batch_size=args.batch_size,
                         epochs=args.epochs,
