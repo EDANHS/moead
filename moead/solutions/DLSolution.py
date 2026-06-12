@@ -55,6 +55,14 @@ class DLSolution(Solution):
     def constraints(self, values: np.ndarray):
         self._constraints = np.asarray(values, dtype=float)
 
+    @property
+    def invalid_genotype(self) -> bool:
+        return self._invalid_genotype
+    
+    @invalid_genotype.setter
+    def invalid_genotype(self, value: bool):
+        self._invalid_genotype = bool(value)
+
     # --- Métodos de Gestión y Preservación de Linaje ---
     
     def set_metadata(self, config: dict, path: str = None, training_time: float = 0.0, epoch: int = 0):

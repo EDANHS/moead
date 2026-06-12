@@ -54,6 +54,8 @@ def parse_args():
     p.add_argument('--log', type=str, default='uniform_moead_dl_log_ctv.json', help='Log file')
     p.add_argument('--checkpoint', type=str, default='uniform_moead_dl_checkpoint_ctv.pkl', help='Checkpoint')
     p.add_argument('--output-metadata', type=str, default='uniform_moead_dl_metadata.json', help='Metadata JSON output file')
+    p.add_argument('--verbose', type=int, default=1, help='0: Silencio | 1: Info Clave | 2: Debug (I/O Keras activo)')
+    
     return p.parse_args()
 
 
