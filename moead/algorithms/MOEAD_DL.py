@@ -248,7 +248,7 @@ class MOEAD_DL:
             
             for idx, i in enumerate(permutation):
                 if idx % 5 == 0: 
-                    print(f"  Subproblema {idx+1}/{self.n_pop}...")
+                    print(f"  GEN {gen} - Subproblema {idx+1}/{self.n_pop}...")
 
                 # 1. Generar Hijo
                 child = self.evolutionary_op.execute(
