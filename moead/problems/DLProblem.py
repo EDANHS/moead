@@ -228,7 +228,10 @@ class DLProblem(Problem):
                 solution.objectives = np.array(historial['objectives'], dtype=float)
                 solution.set_metadata(config=config, training_time=0.0, epoch=int(historial['epoch']))
                 
-                solution.constraints = np.zeros(self.n_constraints)
+                # <--- REEMPLAZA EL np.zeros POR ESTO --->
+                saved_constraints = historial.get('constraints', [float('inf')] * self.n_constraints)
+                solution.constraints = np.array(saved_constraints, dtype=float)
+                
                 return
 
             # --- CACHE MISS ---

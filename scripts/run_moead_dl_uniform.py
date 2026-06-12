@@ -227,13 +227,24 @@ def main():
         print(f"FATAL: {e}")
         return
 
+    output_dir = PROJECT_ROOT / 'resultados' / f'resultado_discreto_{args.organo}'
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = output_dir / args.log
+    checkpoint_path = output_dir / args.checkpoint
+    metadata_path = Path(args.output_metadata)
+
+    cache_json_path = output_dir / f'nas_evaluation_cache_{args.organo}.json'
+
     # 1. Instanciación del entorno evaluativo (Fenotipo)
     problem = DLProblem(X_train, Y_train, X_val, Y_val,
                         X_test=X_test, Y_test=Y_test,
                         train_batch_size=args.batch_size,
                         val_batch_size=args.batch_size,
                         epochs=args.epochs,
-                        patience=args.patience)
+                        patience=args.patience,
+                        verbose=args.verbose,
+                        cache_path=cache_json_path)
     
     # 2. Heurística de la Tasa de Mutación
     # Se extrae dinámicamente el número de variables de decisión
@@ -249,13 +260,6 @@ def main():
         mutation=BoundedUniformMutation(prob_mut=dynamic_mutation_rate),
         mating_prob=0.9,
     )
-
-    output_dir = PROJECT_ROOT / 'resultados' / f'resultado_discreto_{args.organo}'
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    log_path = output_dir / args.log
-    checkpoint_path = output_dir / args.checkpoint
-    metadata_path = Path(args.output_metadata)
 
     print(f"\n--> Iniciando MOEAD_DL Discreto (NAS):")
     print(f"    - Generaciones: {args.n_generations} | Vecinos: {args.n_neighbors} | Órgano: {args.organo}")
