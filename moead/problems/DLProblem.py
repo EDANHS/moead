@@ -28,7 +28,8 @@ class DLProblem(Problem):
                  train_batch_size: int = 4,  # Lote físico reducido para entrenamiento
                  val_batch_size: int = 8,    # Lote de validación puede ser mayor
                  epochs: int = 20,
-                 patience: int = 5):
+                 patience: int = 5,
+                 verbose: int = 0):
         
         self.input_shape = input_shape
 
@@ -44,6 +45,7 @@ class DLProblem(Problem):
         self.val_batch_size = val_batch_size
         self.epochs = epochs
         self.patience = patience
+        self.verbose = verbose
         
         # Configuración de memoria GPU
         self.gpu_memory_gb = 16.0  # RTX 5080 tiene 16GB VRAM
@@ -232,7 +234,7 @@ class DLProblem(Problem):
                 validation_data=val_ds, 
                 epochs=self.epochs,
                 callbacks=callbacks,
-                verbose=1
+                verbose=self.verbose
             )
             elapsed_time = time.time() - start_time
 
