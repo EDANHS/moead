@@ -282,11 +282,13 @@ class DLProblem(Problem):
             # --- FASE 5: PURGA ABSOLUTA DE GRADOS DE LIBERTAD EN VRAM ---
             if 'model' in locals(): del model
             if 'train_ds' in locals(): del train_ds
-            if 'val_ds' in locals(): del val_ds
             
-            # Condición de limpieza: Eliminar eval_ds solo si se instanció como un objeto independiente de val_ds
-            if 'eval_ds' in locals() and eval_ds is not val_ds: 
+            # Si X_test no es None, sabemos con certeza que eval_ds fue 
+            # instanciado como un pipeline completamente independiente.
+            if 'eval_ds' in locals() and self.X_test is not None: 
                 del eval_ds
+                
+            if 'val_ds' in locals(): del val_ds
             
             K.clear_session()
             gc.collect()
