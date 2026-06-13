@@ -35,6 +35,7 @@ def evaluation_worker(queue,
                       X_path, Y_path, 
                       input_shape, 
                       train_batch_size, 
+                      gradient_accumulation_steps,
                       val_batch_size, 
                       epochs, 
                       patience, 
@@ -139,7 +140,7 @@ def evaluation_worker(queue,
         # 4. Compilación y Configuración
         optimizador_acumulativo = tf.keras.optimizers.Adam(
             learning_rate=0.001,
-            gradient_accumulation_steps=train_batch_size
+            gradient_accumulation_steps=gradient_accumulation_steps
         )
 
         model.compile(
@@ -231,14 +232,43 @@ def bounds_worker(q, input_shape, min_config, max_config):
     try:
         from moead.models import build_unet
         import tensorflow as tf
+        
+        # Configuración explícita de Growth en el subproceso para mediciones precisas
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                except RuntimeError:
+                    pass
+
+        # --- 1. AUDITORÍA: Arquitectura Mínima ---
         m_min = build_unet(input_shape, **min_config)
         p_min = m_min.count_params()
+        
+        if gpus:
+            mem_min = tf.config.experimental.get_memory_info('GPU:0')
+            print(f"    [GPU Bounds] U-Net MÍNIMA ({p_min:,} params) -> VRAM Ocupada: {mem_min['current']/1024**3:.3f} GB")
+        
         del m_min
         
+        # Purga crítica para no inflar la medición de la red máxima
+        tf.keras.backend.clear_session() 
+        import gc
+        gc.collect()
+
+        # --- 2. AUDITORÍA: Arquitectura Máxima ---
         m_max = build_unet(input_shape, **max_config)
         p_max = m_max.count_params()
+        
+        if gpus:
+            mem_max = tf.config.experimental.get_memory_info('GPU:0')
+            print(f"    [GPU Bounds] U-Net MÁXIMA ({p_max:,} params) -> VRAM Ocupada: {mem_max['current']/1024**3:.3f} GB")
+            
         del m_max
         
         q.put((float(p_min), float(p_max)))
-    except Exception:
+        
+    except Exception as e:
+        print(f"    [ERROR Bounds] Falló la instanciación de los límites: {e}")
         q.put((53.0, 350000000.0)) # Fallback genérico

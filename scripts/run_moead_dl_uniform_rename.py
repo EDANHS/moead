@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -36,13 +35,13 @@ from moead.problems import DLProblemRefactor
 def parse_args():
     p = argparse.ArgumentParser(description="Run MOEAD_DL with Discrete Uniform Operators for NAS")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Enable GPU')
-    p.add_argument('--timeout-per-evaluation', type=int, default=1200, help='Timeout per evaluation in seconds')
+    p.add_argument('--timeout-per-evaluation', type=int, default=1800, help='Timeout per evaluation in seconds')
     p.add_argument('--n_generations', type=int, default=25, help='Generations')
     p.add_argument('--h_divisions', type=int, default=49, help='H divisions para vectores lambda')
     p.add_argument('--n_neighbors', type=int, default=10, help='Neighbors')
     p.add_argument('--patience', type=int, default=5, help='Paciencia para early stopping')
     p.add_argument('--epochs', type=int, default=20, help='Número máximo de epochs por arquitectura')
-    p.add_argument('--batch_size', type=int, default=4, help='Batch size físico para entrenamiento (VRAM control)')
+    p.add_argument('--batch_size', type=int, default=8, help='Batch size físico para entrenamiento (VRAM control)')
     p.add_argument('--n_r', type=int, default=2, help='Max replacements en vecindario')
     p.add_argument('--organo', type=str, default='ctv', help='Órgano objetivo de segmentación')
     p.add_argument('--log', type=str, default='uniform_moead_dl_log_ctv.json', help='Log file')
@@ -166,6 +165,7 @@ def main():
     # 1. Instanciación del entorno evaluativo (Fenotipo)
     problem = DLProblemRefactor(X_data=path_x, Y_data=path_y,
                                 train_batch_size=args.batch_size,
+                                gradient_accumulation_steps=2,
                                 val_batch_size=args.batch_size,
                                 epochs=args.epochs,
                                 patience=args.patience,

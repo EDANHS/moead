@@ -21,7 +21,8 @@ class DLProblemRefactor(Problem):
     def __init__(self, 
                  X_data, Y_data,
                  input_shape=(256, 256, 1),
-                 train_batch_size: int = 4, 
+                 train_batch_size: int = 4,
+                 gradient_accumulation_steps: int = 2,
                  val_batch_size: int = 8,  
                  epochs: int = 20,
                  patience: int = 5,
@@ -40,6 +41,7 @@ class DLProblemRefactor(Problem):
         self.Y_data = Y_data
 
         self.train_batch_size = train_batch_size
+        self.gradient_accumulation_steps = gradient_accumulation_steps
         self.val_batch_size = val_batch_size
         self.epochs = epochs
         self.patience = patience
@@ -53,9 +55,9 @@ class DLProblemRefactor(Problem):
         self._load_cache_from_disk()
         
         # 2. Definir los Espacios de Búsqueda
-        self.filters_opts = [i for i in range(2, 65, 2)] 
+        self.filters_opts = [i for i in range(2, 129, 2)] 
         self.dropouts_opts = [round(i * 0.05, 2) for i in range(11)] 
-        self.kernel_opts = [(1,1), (3,3), (5,5)] 
+        self.kernel_opts = [(1,1), (3,3), (5,5), (7,7)] 
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None'] 
         self.pool_opts = ['Max', 'Average']
@@ -64,7 +66,7 @@ class DLProblemRefactor(Problem):
         
         # 3. Definir los Bounds Numéricos para DE
         self._bounds = [
-            (1.0, 5.99),                      
+            (1.0, 7.99),                      
             (0.0, len(self.filters_opts) - 0.01), 
             (0.0, len(self.kernel_opts) - 0.01),  
             (0.0, len(self.act_opts) - 0.01),     
@@ -130,7 +132,7 @@ class DLProblemRefactor(Problem):
             'use_bias': False, 'pooling_type': 'Max', 'upsample_type': 'BilinearUpsample'
         }
         max_config = {
-            'depth': 5, 'initial_filters': self.filters_opts[-1], 'kernel_size': (5,5),
+            'depth': 7, 'initial_filters': self.filters_opts[-1], 'kernel_size': (7,7),
             'activation_name': 'Swish', 'norm_type': 'Batch', 'dropout_rate': 0.5,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
@@ -145,7 +147,7 @@ class DLProblemRefactor(Problem):
             p_min, p_max = q.get(timeout=60) 
         except py_queue.Empty:
             p.terminate()
-            p_min, p_max = 200.0, 35000000.0
+            p_min, p_max = 53.0, 35000000.0
             
         p.join()
         return p_min, p_max
@@ -226,6 +228,7 @@ class DLProblemRefactor(Problem):
                 self.X_data, self.Y_data,
                 self.input_shape,
                 self.train_batch_size,
+                self.gradient_accumulation_steps,
                 self.val_batch_size,
                 self.epochs,
                 self.patience,
@@ -263,8 +266,21 @@ class DLProblemRefactor(Problem):
             elapsed_time = result["elapsed"]
             epochs_registradas = result["epochs"]
 
+            # --- CÁLCULO DE OBJETIVOS ---
             obj_dice_loss = float(1.0 - final_val_dice)
+            
+            # NUEVO: ESCUDO ANTI-NaN / EXPLOSIÓN DE GRADIENTES
+            if np.isnan(obj_dice_loss) or np.isinf(obj_dice_loss):
+                if self.verbose >= 1: 
+                    print("    [WARN] Arquitectura inestable (Gradients Exploded -> NaN). Penalizando.")
+                obj_dice_loss = 1.0  # Peor valor posible
+
             obj_params_norm = float((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params))
+            
+            # NUEVO: ESCUDO ANTI-NaN PARA PARÁMETROS (Por si acaso)
+            if np.isnan(obj_params_norm) or np.isinf(obj_params_norm):
+                obj_params_norm = 1.0
+
             obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
 
             if self.verbose >= 1:
