@@ -21,7 +21,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'    # Previene el secuestro absoluto de VRAM
+
+#os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'    # Previene el secuestro absoluto de VRAM
+os.environ.pop("TF_GPU_ALLOCATOR", None)
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'        # Fuerza el crecimiento elástico
 os.environ['CUDA_CACHE_MAXSIZE'] = '4294967296'         # 4GB de caché para evitar recompilar PTX
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'                # Silencia advertencias C++ no críticas

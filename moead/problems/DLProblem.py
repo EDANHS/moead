@@ -44,6 +44,34 @@ class DLProblem(Problem):
         self.X_test = X_test
         self.Y_test = Y_test
 
+        # =====================================================
+        # DATASETS PERSISTENTES
+        # =====================================================
+
+        self.train_ds = self._create_dataset(
+            self.X_train,
+            self.Y_train,
+            custom_batch_size=train_batch_size,
+            is_training=True
+        )
+
+        self.val_ds = self._create_dataset(
+            self.X_val,
+            self.Y_val,
+            custom_batch_size=val_batch_size,
+            is_training=False
+        )
+
+        self.test_ds = None
+
+        if self.X_test is not None and self.Y_test is not None:
+            self.test_ds = self._create_dataset(
+                self.X_test,
+                self.Y_test,
+                custom_batch_size=val_batch_size,
+                is_training=False
+            )
+
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
         self.epochs = epochs
@@ -262,9 +290,6 @@ class DLProblem(Problem):
                 jit_compile=False
             )
 
-            train_ds = self._create_dataset(self.X_train, self.Y_train, custom_batch_size=self.train_batch_size, is_training=True)
-            val_ds = self._create_dataset(self.X_val, self.Y_val, custom_batch_size=self.val_batch_size, is_training=False)
-
             callbacks = []
             if self.patience > 0:
                 stopper = EarlyStopping(monitor='val_loss', patience=self.patience, mode='min', restore_best_weights=True)
@@ -275,8 +300,8 @@ class DLProblem(Problem):
 
             start_time = time.time()
             history = model.fit(
-                train_ds,
-                validation_data=val_ds, 
+                self.train_ds,
+                validation_data=self.val_ds,
                 epochs=self.epochs,
                 callbacks=callbacks,
                 verbose=keras_fit_verbose
@@ -285,12 +310,10 @@ class DLProblem(Problem):
             epochs_registradas = len(history.history['loss'])
 
             # FASE 4: METODOLOGÍA DE EVALUACIÓN
-            if self.X_test is not None and self.Y_test is not None:
-                if self.verbose >= 2: print("    [METODOLOGÍA] Evaluando sobre el conjunto de Prueba aislado.")
-                eval_ds = self._create_dataset(self.X_test, self.Y_test, custom_batch_size=self.val_batch_size, is_training=False)
+            if self.test_ds is not None:
+                eval_ds = self.test_ds
             else:
-                if self.verbose >= 2: print("    [METODOLOGÍA] Fallback: Evaluando sobre el conjunto de Validación (X_val).")
-                eval_ds = val_ds
+                eval_ds = self.val_ds
 
             keras_eval_verbose = 1 if self.verbose >= 2 else 0
             eval_results = model.evaluate(eval_ds, verbose=keras_eval_verbose)
@@ -314,6 +337,14 @@ class DLProblem(Problem):
                 epoch=epochs_registradas
             )
             debe_guardar_cache = True
+
+            mem = tf.config.experimental.get_memory_info('GPU:0')
+
+            print(
+                f"[GPU] current={mem['current']/1024**3:.2f}GB "
+                f"peak={mem['peak']/1024**3:.2f}GB"
+            )
+
 
         except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
             if self.verbose >= 1: print(f"    [OOM] Memoria excedida. Penalizando arquitectura.")
@@ -339,10 +370,19 @@ class DLProblem(Problem):
                 }
                 self._save_cache_to_disk()
 
+            # --- PURGA AGRESIVA DE MEMORIA ---
+            # 1. Matar todas las referencias de Keras en Python
             if 'model' in locals(): del model
-            if 'train_ds' in locals(): del train_ds
-            if 'eval_ds' in locals() and self.X_test is not None: del eval_ds
-            if 'val_ds' in locals(): del val_ds
+            if 'history' in locals(): del history
+            if 'optimizador_acumulativo' in locals(): del optimizador_aacumulativo
             
+            # 2. Destruir el Grafo de TensorFlow en C++
             K.clear_session()
+            
+            # 3. Forzar la recolección de basura de Python
             gc.collect()
+            
+            # 4. Pausa estratégica de 5 segundos
+            # Obliga al script a esperar que la VRAM de la RTX 5080 realmente se vacíe 
+            # antes de instanciar el siguiente subproblema.
+            time.sleep(5)
