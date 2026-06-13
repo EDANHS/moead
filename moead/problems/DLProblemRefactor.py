@@ -66,7 +66,7 @@ class DLProblemRefactor(Problem):
         
         # 3. Definir los Bounds Numéricos para DE
         self._bounds = [
-            (1.0, 7.99),                      
+            (1.0, 6.99),                      
             (0.0, len(self.filters_opts) - 0.01), 
             (0.0, len(self.kernel_opts) - 0.01),  
             (0.0, len(self.act_opts) - 0.01),     
@@ -132,7 +132,7 @@ class DLProblemRefactor(Problem):
             'use_bias': False, 'pooling_type': 'Max', 'upsample_type': 'BilinearUpsample'
         }
         max_config = {
-            'depth': 7, 'initial_filters': self.filters_opts[-1], 'kernel_size': (7,7),
+            'depth': 6, 'initial_filters': self.filters_opts[-1], 'kernel_size': (7,7),
             'activation_name': 'Swish', 'norm_type': 'Batch', 'dropout_rate': 0.5,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
