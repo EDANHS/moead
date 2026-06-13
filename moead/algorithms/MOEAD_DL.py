@@ -103,7 +103,8 @@ class MOEAD_DL:
             'z_star': self.z_star,
             'current_gen': self.current_gen,
             'archive': self.archive,
-            'history': self.history
+            'history': self.history,
+            'random_state': np.random.get_state()
         }
         try:
             with open(self.checkpoint_file, 'wb') as f:
@@ -180,6 +181,11 @@ class MOEAD_DL:
             self.z_star = np.array(z_star) if not isinstance(z_star, np.ndarray) else z_star
             self.current_gen = int(current_gen) if current_gen is not None else 0
 
+            # NUEVA ADICIÓN: Reinyectar el estado genético de la aleatoriedad
+            if 'random_state' in state:
+                np.random.set_state(state['random_state'])
+                print("--> Estado aleatorio de NumPy restaurado con éxito (Determinismo garantizado).")
+
             # Restauración de Archive y History
             self.archive = archive if hasattr(archive, 'get_solutions') else Archive(max_size=self.n_pop)
             self.history = history if hasattr(history, 'get_history') else History()
@@ -225,7 +231,7 @@ class MOEAD_DL:
                 self._save_checkpoint()
             
             # Log final de inicialización
-            self.history.log_generation(self.z_star, len(self.archive.get_solutions()))
+            self.history.log_generation(self.z_star, len(self.archive.get_solutions()), self.population)
             self.json_logger.log_generation(0, self.population, self.archive.get_solutions())
             self._save_checkpoint()
 
@@ -296,7 +302,7 @@ class MOEAD_DL:
                         replaced_count += 1
             
             # Logs y Checkpoint por generación
-            self.history.log_generation(self.z_star, len(self.archive.get_solutions()))
+            self.history.log_generation(self.z_star, len(self.archive.get_solutions()), self.population)
             self.json_logger.log_generation(gen, self.population, self.archive.get_solutions())
             self._save_checkpoint()
             
