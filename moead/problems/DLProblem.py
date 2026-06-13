@@ -374,7 +374,7 @@ class DLProblem(Problem):
             # 1. Matar todas las referencias de Keras en Python
             if 'model' in locals(): del model
             if 'history' in locals(): del history
-            if 'optimizador_acumulativo' in locals(): del optimizador_aacumulativo
+            if 'optimizador_acumulativo' in locals(): del optimizador_acumulativo
             
             # 2. Destruir el Grafo de TensorFlow en C++
             K.clear_session()
