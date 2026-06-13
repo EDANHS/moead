@@ -149,7 +149,7 @@ def save_metadata(
 
 def main():
     args = parse_args()
-
+    print(f"--> Timeout por evaluación: {args.timeout_per_evaluation} segundos")
     output_dir = PROJECT_ROOT / 'resultados' / f'resultado_discreto_{args.organo}'
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -55,7 +55,7 @@ class DLProblemRefactor(Problem):
         self._load_cache_from_disk()
         
         # 2. Definir los Espacios de Búsqueda
-        self.filters_opts = [i for i in range(2, 129, 2)] 
+        self.filters_opts = [i for i in range(2, 65, 2)] 
         self.dropouts_opts = [round(i * 0.05, 2) for i in range(11)] 
         self.kernel_opts = [(1,1), (3,3), (5,5), (7,7)] 
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
@@ -66,7 +66,7 @@ class DLProblemRefactor(Problem):
         
         # 3. Definir los Bounds Numéricos para DE
         self._bounds = [
-            (1.0, 6.99),                      
+            (1.0, 5.99),                      
             (0.0, len(self.filters_opts) - 0.01), 
             (0.0, len(self.kernel_opts) - 0.01),  
             (0.0, len(self.act_opts) - 0.01),     
@@ -132,7 +132,7 @@ class DLProblemRefactor(Problem):
             'use_bias': False, 'pooling_type': 'Max', 'upsample_type': 'BilinearUpsample'
         }
         max_config = {
-            'depth': 6, 'initial_filters': self.filters_opts[-1], 'kernel_size': (7,7),
+            'depth': 5, 'initial_filters': self.filters_opts[-1], 'kernel_size': (7,7),
             'activation_name': 'Swish', 'norm_type': 'Batch', 'dropout_rate': 0.5,
             'use_bias': True, 'pooling_type': 'Max', 'upsample_type': 'TransposeConv'
         }
