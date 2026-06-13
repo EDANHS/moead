@@ -92,15 +92,16 @@ def evaluation_worker(queue,
 
         def build_tf_dataset(indices, batch_size, is_training):
             if len(indices) == 0:
-                return None
+                return None, 0
             
-            # El generador escupe un par (X, Y) solo cuando Keras se lo pide
+            # 1. Bucle infinito para que Keras nunca pida datos al vacío
             def data_generator():
-                idxs = np.copy(indices)
-                if is_training:
-                    np.random.shuffle(idxs) # Barajado dinámico por Epoch
-                for i in idxs:
-                    yield X_mmap[i], Y_mmap[i]
+                while True: 
+                    idxs = np.copy(indices)
+                    if is_training:
+                        np.random.shuffle(idxs)
+                    for i in idxs:
+                        yield X_mmap[i], Y_mmap[i]
 
             ds = tf.data.Dataset.from_generator(
                 data_generator,
@@ -109,12 +110,20 @@ def evaluation_worker(queue,
                     tf.TensorSpec(shape=shape_y, dtype=tf.float32)
                 )
             )
-            return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+            
+            # 2. Calculamos los pasos matemáticos exactos (ceil para no perder el último lote)
+            steps = max(1, int(np.ceil(len(indices) / batch_size)))
+            
+            return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE), steps
 
-        # Construcción instantánea
-        train_ds = build_tf_dataset(idx_train, train_batch_size, is_training=True)
-        val_ds = build_tf_dataset(idx_val, val_batch_size, is_training=False)
-        test_ds = build_tf_dataset(idx_test, val_batch_size, is_training=False)
+        # Construcción instantánea (ahora desempaquetamos los steps)
+        train_ds, train_steps = build_tf_dataset(idx_train, train_batch_size, is_training=True)
+        val_ds, val_steps = build_tf_dataset(idx_val, val_batch_size, is_training=False)
+        
+        test_ds = None
+        test_steps = 0
+        if len(idx_test) > 0:
+            test_ds, test_steps = build_tf_dataset(idx_test, val_batch_size, is_training=False)
 
         # 3. Construcción del Modelo y Barrera Paramétrica
         model = build_unet(input_shape, **config)
@@ -149,11 +158,14 @@ def evaluation_worker(queue,
 
         keras_fit_verbose = 2 if verbose >= 2 else 0
 
-        # 5. Entrenamiento
         start_time = time.time()
         history = model.fit(
-            train_ds, validation_data=val_ds,
-            epochs=epochs, callbacks=callbacks,
+            train_ds, 
+            validation_data=val_ds,
+            epochs=epochs, 
+            steps_per_epoch=train_steps,  # <--- CONTROL ESTRICTO
+            validation_steps=val_steps,   # <--- CONTROL ESTRICTO
+            callbacks=callbacks,
             verbose=keras_fit_verbose
         )
         elapsed_time = time.time() - start_time
@@ -161,8 +173,10 @@ def evaluation_worker(queue,
 
         # 6. Evaluación
         eval_ds = test_ds if test_ds is not None else val_ds
+        eval_steps = test_steps if test_ds is not None else val_steps
+        
         keras_eval_verbose = 1 if verbose >= 2 else 0
-        eval_results = model.evaluate(eval_ds, verbose=keras_eval_verbose)
+        eval_results = model.evaluate(eval_ds, steps=eval_steps, verbose=keras_eval_verbose)
         
         # Asumiendo que eval_results = [loss, dice_coefficient]
         final_val_dice = float(eval_results[1])
