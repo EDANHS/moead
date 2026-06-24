@@ -11,3 +11,5 @@ data/
 *.ipynb
 dataset_*
 moead_dl_*
+*.png
+*.json
