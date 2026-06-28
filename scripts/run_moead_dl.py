@@ -54,27 +54,24 @@ def configure_device(use_gpu: bool):
 
 def load_data(root_path: Path) -> tuple:
     """Carga datos y asegura float32 desde el origen."""
-    data_dir = root_path / 'dataset_moead_5k_final/' 
+    data_dir = root_path / 'dataset_moead_5k_final/'
     path_x = data_dir / "X_train_ctv.npy"
     path_y = data_dir / "Y_train_ctv.npy"
-    
+
     print(f"--> Cargando datos desde: {data_dir}")
-    
+
     if not path_x.exists() or not path_y.exists():
         raise FileNotFoundError(f"No se encontraron los archivos .npy en {data_dir}")
 
     try:
-        # CONVERSIÓN PREVENTIVA A FLOAT32
-        # Esto evita que TF intente hacer Casts dentro de la GPU
         X = np.load(path_x).astype(np.float32)
         Y = np.load(path_y).astype(np.float32)
         print(f"--> Datos cargados y convertidos a float32. Shape X: {X.shape}")
     except Exception as e:
         raise RuntimeError(f"Error cargando .npy: {e}")
-    
+
     X_t, X_v, Y_t, Y_v = train_test_split(X, Y, test_size=0.2, random_state=42)
-    # Liberamos memoria de los originales inmediatamente
-    del X, Y 
+    del X, Y
     return X_t, Y_t, X_v, Y_v
 
 def plot_front(archive, out_path: Path):

@@ -170,16 +170,15 @@ if __name__ == '__main__':
     # ---------------------------------------------------------
     
     # [NUEVO] Horizonte Temporal de Truncamiento (Ej. 8 significa de Gen 0 a Gen 8)
-    TARGET_GEN = 8
+    TARGET_GEN = 25
     
-    ALGORITHM_ID = "diferential_evolution" 
+    ALGORITHM_ID = "uniform_crossover" 
     
     LOG_FILES = [
-        "archivos_cache/ejecucion_moead_de.log",
-        "archivos_cache/ejecucion_moead_de_2.log"
+        "archivos_cache/ejecucion_moead.log"
     ]
-    HISTORY_FILE = "archivos_cache/de_moead_dl_checkpoint_ctv.pkl.json"
-    CACHE_FILE = "archivos_cache/nas_evaluation_cache_de_ctv.json"
+    HISTORY_FILE = "archivos_cache/uniform_moead_dl_checkpoint_ctv.pkl.json"
+    CACHE_FILE = "archivos_cache/nas_evaluation_cache_ctv.json"
     
     OUTPUT_DIR = Path("data_marts")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

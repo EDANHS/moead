@@ -217,8 +217,9 @@ def main():
         print(f"FATAL: {e}")
         return
 
-    problem = DLProblem(X_train, Y_train, X_val, Y_val, 
-                        batch_size=args.batch_size,
+    problem = DLProblem(X_train, Y_train, X_val, Y_val,
+                        train_batch_size=args.batch_size,
+                        val_batch_size=args.batch_size,
                         epochs=args.epochs,
                         patience=args.patience)
     

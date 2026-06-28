@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import gc
 import time
@@ -14,25 +15,24 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 def to_scientific_notation(num: int) -> str:
     """Convierte un entero a formato científico N x 10^X legible para tesis."""
-    fmt = f"{num:.2e}"  # Ejemplo: '1.54e+06'
+    fmt = f"{num:.2e}"
     base, exponent = fmt.split('e')
-    exponent = int(exponent)  # Elimina signos + y ceros a la izquierda
+    exponent = int(exponent)
     return f"{base} x 10^{exponent}"
 
-def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_path, epochs=100, patience=5):
+def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_path, save_dir, epochs=100, patience=5):
     """
     PROCESO HIJO TOTALMENTE AISLADO.
     TensorFlow e hilos de CUDA nacen y mueren exclusivamente aquí.
     """
-    # Parches elásticos para control estricto de VRAM
+    # Parches estelares para control estricto de VRAM
     os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
     os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
     os.environ['CUDA_CACHE_MAXSIZE'] = '4294967296'
     
     raw_params = 0
     try:
-        # 1. Carga determinista y partición de datos dentro del subproceso
-        # Al usar el mismo random_state, cada worker operará exactamente sobre los mismos conjuntos.
+        # 1. Carga determinista y partición de datos
         X = np.load(X_path).astype(np.float32)
         Y = np.load(Y_path).astype(np.float32)
         input_shape = X.shape[1:]
@@ -45,28 +45,31 @@ def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_pa
         )
         del X, Y, X_temp, Y_temp  # Liberación inmediata de RAM
         
-        # 2. Lazy Loading de módulos pesados de TensorFlow
+        # 2. Lazy Loading de módulos
         import tensorflow as tf
         from tensorflow.keras.callbacks import EarlyStopping
         from tensorflow.keras import mixed_precision
         from moead.models import build_unet
         from moead.utils.tf_metrics import dice_coefficient, dice_loss
+        
+        # Lazy Loading seguro de Matplotlib para subprocesos
+        import matplotlib
+        matplotlib.use('Agg')  # Backend 'Agg' previene errores de GUI en multiprocesamiento
+        import matplotlib.pyplot as plt
 
-        # Activación de precisión mixta para acelerar el entrenamiento
         mixed_precision.set_global_policy("mixed_float16")
 
-        # Configuración dinámica de VRAM
         gpus = tf.config.list_physical_devices('GPU')
         if gpus:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
 
-        # 3. Construcción del modelo específico
+        # 3. Construcción del modelo
         print(f"\n[Worker - {compromise_key}] Construyendo Arquitectura...")
         model = build_unet(input_shape, **model_config)
         raw_params = model.count_params()
 
-        # 4. Compilación con Gradiente Acumulado (Simula lotes grandes sin saturar VRAM)
+        # 4. Compilación
         optimizador = tf.keras.optimizers.Adam(
             learning_rate=0.001,
             gradient_accumulation_steps=2
@@ -82,9 +85,9 @@ def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_pa
             EarlyStopping(monitor='val_loss', patience=patience, mode='min', restore_best_weights=True)
         ]
 
-        # 5. Entrenamiento Intensivo
+        # 5. Entrenamiento Intensivo y captura del historial
         print(f"[Worker - {compromise_key}] Iniciando entrenamiento de {epochs} épocas...")
-        model.fit(
+        history = model.fit(
             X_train, Y_train,
             validation_data=(X_val, Y_val),
             batch_size=8,
@@ -93,17 +96,40 @@ def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_pa
             verbose=1
         )
 
-        # 6. Evaluación en el conjunto de TEST (Datos completamente inéditos)
+        # 6. Evaluación en el conjunto de TEST
         print(f"[Worker - {compromise_key}] Evaluando en Set de Test...")
         eval_results = model.evaluate(X_test, Y_test, batch_size=8, verbose=0)
-        final_test_dice = float(eval_results[1])  # Índice 1 corresponde a dice_coefficient
+        final_test_dice = float(eval_results[1])
 
-        # Enviar resultados exitosos al proceso padre
+        # 7. GUARDAR EL MODELO ENTRENADO (.keras y .h5)
+        model_save_path_keras = os.path.join(save_dir, f"{compromise_key}.keras")
+        model_save_path_h5 = os.path.join(save_dir, f"{compromise_key}.h5")
+        model.save(model_save_path_keras)
+        model.save(model_save_path_h5)
+        
+        # 8. GENERAR Y GUARDAR GRÁFICA DE PÉRDIDA
+        plot_save_path = os.path.join(save_dir, f"{compromise_key}_loss_plot.png")
+        plt.figure(figsize=(10, 6))
+        plt.plot(history.history['loss'], label='Entrenamiento (Train Loss)', color='blue', linewidth=2)
+        plt.plot(history.history['val_loss'], label='Validación (Val Loss)', color='red', linestyle='--', linewidth=2)
+        plt.title(f'Curva de Pérdida (Dice Loss) - {compromise_key}', fontsize=14)
+        plt.xlabel('Épocas', fontsize=12)
+        plt.ylabel('Pérdida', fontsize=12)
+        plt.legend(loc='upper right')
+        plt.grid(True, linestyle=':', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(plot_save_path, dpi=300)
+        plt.close() # Cerrar figura para liberar memoria RAM
+        
+        print(f"[Worker - {compromise_key}] Artefactos guardados exitosamente en la carpeta de destino.")
+
+        # Enviar resultados al proceso padre
         queue.put({
             "compromise": compromise_key,
             "success": True,
             "params": raw_params,
             "test_dice": final_test_dice,
+            "plot_path": f"{compromise_key}_loss_plot.png",
             "error": None
         })
 
@@ -117,9 +143,9 @@ def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_pa
         })
         
     finally:
-        # Purga agresiva previa a la muerte del proceso
-        tf.keras.backend.clear_session()
-        local_vars = ['model', 'X_train', 'Y_train', 'X_val', 'Y_val', 'X_test', 'Y_test']
+        if 'tf' in locals():
+            tf.keras.backend.clear_session()
+        local_vars = ['model', 'X_train', 'Y_train', 'X_val', 'Y_val', 'X_test', 'Y_test', 'history']
         for var in local_vars:
             if var in locals():
                 del locals()[var]
@@ -127,16 +153,23 @@ def isolated_evaluation_worker(queue, compromise_key, model_config, X_path, Y_pa
 
 
 def main():
-    # --- CONFIGURACIÓN DE RUTAS ---
-    COMPROMISES_JSON = "pareto_compromises_gen_8_ux.json"  # Tu JSON generado en el paso anterior
+    if len(sys.argv) < 2:
+        print("[ERROR] Debes proporcionar el nombre de la etiqueta como argumento.")
+        print("Uso correcto: python script.py <nombre_de_la_etiqueta>")
+        sys.exit(1)
+        
+    etiqueta_carpeta = sys.argv[1]
+
+    COMPROMISES_JSON = "pareto_compromises_gen_25_uniform.json"
     X_DATA_PATH = Path("data/X_train_ctv_5k.npy")
     Y_DATA_PATH = Path("data/Y_train_ctv_5k.npy")
-    CONSOLIDATED_OUTPUT = Path("resultados_finales/consolidado_entrenamiento_pareto.json")
     
-    CONSOLIDATED_OUTPUT.parent.mkdir(exist_ok=True)
+    BASE_OUTPUT_DIR = Path("resultados_finales") / etiqueta_carpeta
+    BASE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    CONSOLIDATED_OUTPUT = BASE_OUTPUT_DIR / "consolidado_entrenamiento_pareto.json"
 
     if not os.path.exists(COMPROMISES_JSON):
-        print(f"[ERROR] No se encuentra el archivo de compromisos: {COMPROMISES_JSON}")
+        print(f"[ERROR] No se encuentra el archivo: {COMPROMISES_JSON}")
         return
 
     with open(COMPROMISES_JSON, 'r', encoding='utf-8') as f:
@@ -147,60 +180,43 @@ def main():
         "meta": {
             "source_compromises": COMPROMISES_JSON,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "data_split": "70% Train, 15% Val, 15% Test"
+            "data_split": "70% Train, 15% Val, 15% Test",
+            "etiqueta_directorio": etiqueta_carpeta
         },
         "models": {}
     }
 
-    # Iterar secuencialmente sobre cada perfil para garantizar el aislamiento total de memoria
     for key, info in compromises.items():
         print(f"\n" + "="*70)
-        print(f" Preparation de lanzamiento: Perfil [{key}]")
+        print(f" Preparación de lanzamiento: Perfil [{key}]")
         print(f" Descripción: {info['descripcion']}")
         print("="*70)
 
-        # Extraer la configuración del modelo desde el JSON consolidado previo
-        # Ajustamos dinámicamente si la clave cuelga directamente o de 'model_config'
         model_config = info["datos_red"].get("model_config") or info["datos_red"].get("architecture_config")
-        
         if not model_config:
-            print(f"[ADVERTENCIA] No se encontró configuración de modelo para {key}. Saltando...")
             continue
 
-        # Crear una cola de comunicación dedicada para este subproceso
         queue = Queue()
-
-        # Instanciar el proceso hijo aislado
-        p = Process(
-            target=isolated_evaluation_worker, 
-            args=(queue, key, model_config, X_DATA_PATH, Y_DATA_PATH), # Ajustado abajo a cadenas de texto de ruta
-            kwargs={"epochs": 100, "patience": 5}
-        )
-        
-        # Corregir paso de rutas como String por compatibilidad de serialización en multiproceso
         p = Process(
             target=isolated_evaluation_worker,
-            args=(queue, key, model_config, str(X_DATA_PATH), str(Y_DATA_PATH)),
+            args=(queue, key, model_config, str(X_DATA_PATH), str(Y_DATA_PATH), str(BASE_OUTPUT_DIR)),
             kwargs={"epochs": 100, "patience": 5}
         )
 
         p.start()
-        
-        # Esperar a que el proceso termine por completo antes de continuar con la siguiente arquitectura
         p.join()
 
-        # Recoger los resultados enviados a través de la cola
         if not queue.empty():
-            res = queue.get()
+            res = queue.get(timeout=7200)
             if res["success"]:
                 print(f"--> [ÉXITO - {key}] Test Dice Score obtenido: {res['test_dice']:.4f}")
                 
-                # Almacenamiento limpio según los requisitos de tu tesis
                 final_results["models"][key] = {
                     "descripcion": info['descripcion'],
                     "parametros_notacion_cientifica": to_scientific_notation(res["params"]),
                     "parametros_raw": res["params"],
-                    "test_dice_score": round(res["test_dice"], 4)
+                    "test_dice_score": round(res["test_dice"], 4),
+                    "saved_formats": [f"{key}.keras", f"{key}.h5", res["plot_path"]]
                 }
             else:
                 print(f"--> [FALLO - {key}] El proceso terminó con errores.")
@@ -210,9 +226,8 @@ def main():
                     "error": "RuntimeError durante el aislamiento"
                 }
         else:
-            print(f"--> [CRÍTICO - {key}] El proceso hijo murió abruptamente sin devolver datos.")
+            print(f"--> [CRÍTICO - {key}] El proceso hijo murió.")
 
-    # Guardar el JSON consolidado final
     with open(CONSOLIDATED_OUTPUT, 'w', encoding='utf-8') as f:
         json.dump(final_results, f, indent=4, ensure_ascii=False)
 
