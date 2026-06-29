@@ -1,3 +1,6 @@
+import sys
+import time
+
 import numpy as np
 import multiprocessing
 from moead.solutions import Solution
@@ -29,6 +32,21 @@ class ZCPMoveProposal(EvolutionaryOperator):
         self.surrogate = surrogate_model
         self.pool_size = pool_size
 
+    def _sanitize_metric(self, value) -> float:
+        """
+        Escudo protector contra anomalías topológicas. 
+        Si el cálculo de gradientes colapsa (NaN/Inf), se penaliza la 
+        arquitectura con 0.0 estructural, desplazándola al fondo del ranking.
+        """
+        if value is None or np.isnan(value) or np.isinf(value):
+            return 0.0
+        return float(value)
+    
+    def _force_print(self, message: str):
+        """Utilidad de log forzado para evadir el buffering del sistema OS."""
+        sys.stdout.write(message + '\n')
+        sys.stdout.flush()
+    
     def execute(self, 
                 i: int, 
                 population: list[Solution], 
@@ -53,6 +71,7 @@ class ZCPMoveProposal(EvolutionaryOperator):
         # 1. Muestreo de Descendencia Múltiple y Exploración Local
         for _ in range(self.pool_size):
             # Delegamos la perturbación genotípica (F, CR, SBX) al operador base
+            start_eval = time.perf_counter()
             child = self.base_operator.execute(
                 i=i, population=population, neighborhoods=neighborhoods, 
                 problem=problem, debugger=None, **kwargs
@@ -79,11 +98,14 @@ class ZCPMoveProposal(EvolutionaryOperator):
                 # Tolerancia de latencia ajustada para operativas intraloop
                 result = queue.get(timeout=30) 
                 
+                synflow = self._sanitize_metric(result.get('zcp_synflow', 0.0))
+                snip = self._sanitize_metric(result.get('zcp_snip', 0.0))
+                jacobian = self._sanitize_metric(result.get('zcp_jacobian', 0.0))
                 # Integración de la huella estructural en la configuración
                 if result.get("success", False):
-                    config['zcp_synflow'] = result.get('zcp_synflow', 0.0)
-                    config['zcp_snip'] = result.get('zcp_snip', 0.0)
-                    config['zcp_jacobian'] = result.get('zcp_jacobian', 0.0)
+                    config['zcp_synflow'] = synflow
+                    config['zcp_snip'] = snip
+                    config['zcp_jacobian'] = jacobian
                 else:
                     config['zcp_synflow'] = 0.0
                     config['zcp_snip'] = 0.0
@@ -99,7 +121,19 @@ class ZCPMoveProposal(EvolutionaryOperator):
 
             # 3. Inferencia Subrogada Plenamente Informada
             predicted_loss = self.surrogate.predict_loss(config)
+            
+            raw_params = problem._calculate_params_analytical(config)
+                    
+            # Evitamos posibles divisiones por cero con variables no inicializadas
+            z_min = problem.z_min_params if hasattr(problem, 'z_min_params') else 53
+            z_max = problem.z_max_params if hasattr(problem, 'z_max_params') else  35000000.0
+            obj_params_norm = float(np.clip((raw_params - z_min) / (z_max - z_min), 0.0, 1.0))
+            
+            elapsed_time = time.perf_counter() - start_eval
 
+            self._force_print(f"\n--> [CACHE MISS] Evaluando arquitectura: {config}")
+            self._force_print(f"    Resultados -> Dice Loss Pred: {predicted_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Latencia: {elapsed_time:.4f}s")
+            self._force_print(f"    [OK] Arq {_:04d} | ZCP-Synflow: {synflow:.2e} | ZCP-SNIP: {snip:.2e} | ZCP-Jacobian: {jacobian:.2e}")
             # 4. Presión Selectiva (Torneo de Supervivencia Interno)
             if predicted_loss < best_predicted_loss:
                 best_predicted_loss = predicted_loss
@@ -109,7 +143,7 @@ class ZCPMoveProposal(EvolutionaryOperator):
                 # Inyectamos el diccionario ZCP en la ontología del objeto Solution
                 # Esto previene recalculos redundantes cuando el orquestador principal 
                 # invoque a problem.evaluate(child)
-                setattr(best_child, 'zcp_dict', {
+                setattr(best_child, 'zcp_metrics', {
                     'zcp_synflow': config['zcp_synflow'],
                     'zcp_snip': config['zcp_snip'],
                     'zcp_jacobian': config['zcp_jacobian']
