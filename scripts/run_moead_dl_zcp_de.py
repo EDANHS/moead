@@ -44,7 +44,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Ejecución de MOEAD_ZCP con Evolución Diferencial y PBI para NAS")
     p.add_argument('--use-gpu', action='store_true', default=True, help='Habilita el uso de la GPU (Limitado a extracción ZCP)')
     p.add_argument('--timeout-per-evaluation', type=int, default=90, help='Timeout por evaluación (reducido gracias a ZCP)')
-    p.add_argument('--n_generations', type=int, default=30, help='Número total de generaciones a simular')
+    p.add_argument('--n_generations', type=int, default=25, help='Número total de generaciones a simular')
     p.add_argument('--h_divisions', type=int, default=49, help='H divisions para los vectores lambda')
     p.add_argument('--n_neighbors', type=int, default=10, help='Tamaño del vecindario (T)')
     p.add_argument('--n_r', type=int, default=2, help='Máximos reemplazos permitidos por subproblema')
@@ -61,7 +61,7 @@ def parse_args():
     p.add_argument('--checkpoint', type=str, default='zcp_de_moead_checkpoint.pkl', help='Punto de restauración de memoria')
     p.add_argument('--output-metadata', type=str, default='zcp_de_moead_metadata.json', help='Metadatos y telemetría de ejecución')
     p.add_argument('--verbose', type=int, default=1, help='0: Silencio | 1: Info Clave | 2: Trazabilidad profunda')
-    
+    p.add_argument('--carpeta', type=str, default='resultados', help='Subcarpeta de resultados dentro del proyecto para aislar la ejecución')
     return p.parse_args()
 
 
@@ -179,7 +179,7 @@ def main():
     print("===================================================================\n")
     
     # Aislamiento de persistencia de datos orientada a la experimentación ZCP + DE
-    output_dir = PROJECT_ROOT / 'resultados' / args.experiment_name
+    output_dir = PROJECT_ROOT / args.carpeta / args.experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = output_dir / args.log
@@ -229,7 +229,7 @@ def main():
     print(f"    • Destino de los reportes: {output_dir}\n")
 
     # 4. Orquestación del Motor Multiobjetivo
-    warmup_strategy = ZeroCostWarmup(warmup_size=warmup_size_dinamico)
+    warmup_strategy = ZeroCostWarmup(warmup_size=warmup_size_dinamico, verbose=args.verbose)
     
     moead = MOEAD_ZCP(
         warmup_initializer=warmup_strategy,

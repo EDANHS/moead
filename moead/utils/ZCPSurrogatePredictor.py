@@ -129,8 +129,7 @@ class SurrogatePredictor:
         features = self._vectorize_config(config)
         
         features_2d = features.reshape(1, -1)
-        print(f"--> [SURROGATE] Prediciendo Dice Loss para configuración: {config} - Vector de características: {features_2d}")
-        # Eliminamos el envoltorio extra [...] y el [0] innecesario
+
         prediction = self.model.predict(features_2d)
         
         return float(np.clip(prediction[0], 0.0, 1.0))
