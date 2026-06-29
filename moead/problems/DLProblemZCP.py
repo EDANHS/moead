@@ -2,7 +2,7 @@
 import numpy as np
 import json
 from .DLProblemRefactor import DLProblemRefactor
-from ZCPSurrogate import SurrogatePredictor
+from moead.utils import SurrogatePredictor
 
 class DLProblemZCP(DLProblemRefactor):
     """

@@ -280,74 +280,108 @@ def zcp_evaluation_worker(queue,
                           input_shape: tuple, 
                           max_trainable_params: float, 
                           use_gpu: bool, 
-                          proxy_type: str = "synflow"):
+                          proxy_type: str = "ensemble"):
     """
     Proceso hijo aislado para inferencia analítica de Zero-Cost Proxies.
-    Calcula la viabilidad topológica sin instanciar optimizadores ni iterar datos.
+    Calcula la viabilidad topológica, entrenabilidad y expresividad 
+    sin instanciar optimizadores ni iterar datos empíricos.
     """
-    # 1. Blindaje de Memoria (Ambiente OS)
+    # 1. Blindaje de Memoria (Ambiente OS) para prevenir OOM
     os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
     os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
     os.environ['CUDA_CACHE_MAXSIZE'] = '4294967296'
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
     
     raw_params = 0
+    synflow_score = -np.inf
+    snip_score = -np.inf
+    jacobian_score = -np.inf
 
     try:
+        # Asumimos que configure_device está disponible en tu entorno
+        from moead.utils import configure_device
         configure_device(use_gpu=use_gpu)
+        
         import tensorflow as tf
         from tensorflow.keras import mixed_precision
         from moead.models import build_unet
 
-        # Opcional: Estandarizar precisión para evitar desbordamientos numéricos en gradientes
+        # Estandarización de precisión para evitar desbordamientos numéricos en gradientes
         mixed_precision.set_global_policy("float32") 
 
         # 2. Instanciación Ab Initio (Pesos Aleatorios, Sin Compilar)
         model = build_unet(input_shape, **config)
         raw_params = model.count_params()
 
-        # Barrera Paramétrica de Seguridad
+        # Barrera Paramétrica de Seguridad Espacial
         if raw_params > max_trainable_params:
             queue.put({
-                "success": False, "zcp_score": -np.inf, "params": raw_params, "error": "OOM_PREVENTION"
+                "success": False, "params": raw_params, "error": "OOM_PREVENTION",
+                "zcp_synflow": -np.inf, "zcp_snip": -np.inf, "zcp_jacobian": -np.inf
             })
             return
 
-        # 3. Metodología Synflow (Conservación de Flujo Sináptico)
-        if proxy_type == "synflow":
-            # Generación del tensor sintético (1 solo batch dimensionado a la arquitectura)
-            dummy_input = tf.ones((1, *input_shape), dtype=tf.float32)
+        # 3. Metodología de Ensamble Analítico (Triple-ZCP)
+        if proxy_type == "ensemble" or proxy_type == "synflow":
+            
+            # --- FASE A: Proxies de Gradiente (Synflow & SNIP) ---
+            # Generación de tensor sintético ultra-ligero (Batch = 1)
+            dummy_input_single = tf.ones((1, *input_shape), dtype=tf.float32)
 
-            with tf.GradientTape() as tape:
-                # Intervención crítica: Aseguramos que la red observe los datos de entrada
-                tape.watch(dummy_input)
+            # Métrica 1: Synflow (Conservación de Flujo Sináptico)
+            with tf.GradientTape() as tape_syn:
+                tape_syn.watch(dummy_input_single)
+                output_syn = model(dummy_input_single, training=False)
+                loss_syn = tf.reduce_sum(output_syn)
+
+            grads_syn = tape_syn.gradient(loss_syn, model.trainable_weights)
+            synflow_score = sum(
+                float(tf.reduce_sum(tf.abs(g * w)).numpy()) 
+                for g, w in zip(grads_syn, model.trainable_weights) if g is not None
+            )
+
+            # Métrica 2: SNIP (Entrenabilidad / Sensibilidad Estructural)
+            dummy_noise_target = tf.random.uniform(output_syn.shape, minval=0, maxval=1)
+            with tf.GradientTape() as tape_snip:
+                tape_snip.watch(dummy_input_single)
+                output_snip = model(dummy_input_single, training=False)
+                loss_snip = tf.reduce_mean(tf.square(output_snip - dummy_noise_target))
                 
-                # Propagación Forward
-                output = model(dummy_input, training=False)
-                
-                # Sustitución de la función de pérdida empírica por una suma escalar de activaciones
-                surrogate_loss = tf.reduce_sum(output)
-
-            # Propagación Backward: Extracción de gradientes puros
-            grads = tape.gradient(surrogate_loss, model.trainable_weights)
-
-            # Cálculo de la métrica agregada: Sumatoria del valor absoluto del producto de Hadamard
-            # zcp_score = Sum( | gradientes * pesos | )
-            zcp_score = 0.0
-            for grad, weight in zip(grads, model.trainable_weights):
-                if grad is not None:
-                    # Conversión temporal a float64 para retener precisión en arquitecturas masivas
-                    layer_score = tf.reduce_sum(tf.abs(grad * weight))
-                    zcp_score += float(layer_score.numpy())
+            grads_snip = tape_snip.gradient(loss_snip, model.trainable_weights)
+            snip_score = sum(
+                float(tf.reduce_sum(tf.abs(g * w)).numpy()) 
+                for g, w in zip(grads_snip, model.trainable_weights) if g is not None
+            )
+            
+            # --- FASE B: Proxy Espacial (Covarianza Jacobiana) ---
+            # Requiere un batch mayor a 1 para medir correlación de características
+            batch_size = 16 
+            dummy_batch = tf.random.normal((batch_size, *input_shape))
+            
+            # Forward pass puro, sin tape para economizar VRAM
+            outputs_batch = model(dummy_batch, training=False)
+            outputs_flat = tf.reshape(outputs_batch, (batch_size, -1))
+            outputs_flat = outputs_flat - tf.reduce_mean(outputs_flat, axis=0, keepdims=True)
+            
+            # Construcción de la matriz de Covarianza
+            num_features = tf.cast(tf.shape(outputs_flat)[1], tf.float32)
+            cov_matrix = tf.matmul(outputs_flat, outputs_flat, transpose_b=True) / num_features
+            cov_matrix = cov_matrix + tf.eye(batch_size) * 1e-5 # Estabilización diagonal
+            
+            # Singular Value Decomposition (SVD)
+            s, _, _ = tf.linalg.svd(cov_matrix)
+            jacobian_score = float(tf.reduce_sum(tf.math.log(s + 1e-5)).numpy())
 
         else:
             raise ValueError(f"La heurística ZCP '{proxy_type}' no está implementada.")
 
-        # 4. Transmisión de Resultados al Orquestador
+        # 4. Transmisión de Resultados Multidimensionales al Orquestador
         queue.put({
             "success": True,
-            "zcp_score": zcp_score,
             "params": raw_params,
+            "zcp_synflow": synflow_score,
+            "zcp_snip": snip_score,
+            "zcp_jacobian": jacobian_score,
             "error": None
         })
 
@@ -359,12 +393,21 @@ def zcp_evaluation_worker(queue,
             error_type = traceback.format_exc()
             
         queue.put({
-            "success": False, "zcp_score": -np.inf, "params": raw_params, "error": error_type
+            "success": False, 
+            "params": raw_params, 
+            "error": error_type,
+            "zcp_synflow": -np.inf, 
+            "zcp_snip": -np.inf, 
+            "zcp_jacobian": -np.inf
         })
         
     finally:
-        # 5. Destrucción Sistemática del Grafo Computacional
-        local_vars = ['model', 'dummy_input', 'grads', 'output', 'tape']
+        # 5. Destrucción Sistemática del Grafo Computacional (Evitar Memory Leaks)
+        local_vars = [
+            'model', 'dummy_input_single', 'dummy_batch', 
+            'grads_syn', 'grads_snip', 'output_syn', 'output_snip', 'outputs_batch',
+            'tape_syn', 'tape_snip'
+        ]
         for var in local_vars:
             if var in locals():
                 del locals()[var]

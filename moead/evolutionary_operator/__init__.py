@@ -1,3 +1,4 @@
 from .EvolutionaryOperator import EvolutionaryOperator
 from .CrossoverMutation import CrossoverMutation
 from .DifferentialEvolution import DifferentialEvolution
+from .ZCPMoveProposal import ZCPMoveProposal
