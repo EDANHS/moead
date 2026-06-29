@@ -1,25 +1,21 @@
-# Nuevo Archivo: DLProblemZCP.py
 import numpy as np
 import json
+import time
 from .DLProblemRefactor import DLProblemRefactor
 from moead.utils import SurrogatePredictor
 
 class DLProblemZCP(DLProblemRefactor):
     """
     Especialización Zero-Cost del Problema de Optimización.
-    Implementa un motor de evaluación híbrido de baja latencia:
-    - F1 (Pérdida): Inferencia subrogada vía Random Forest (ZCPSurrogate).
-    - F2 (Complejidad): Cálculo algebraico exacto O(1) (Conteo paramétrico).
+    Mantiene compatibilidad de logs con el ecosistema de visualización 
+    y reportabilidad de métricas (Dice, Parámetros, Latencia real).
     """
     def __init__(self, surrogate_model: SurrogatePredictor, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.surrogate = surrogate_model
 
     def _calculate_params_analytical(self, config: dict) -> int:
-        """
-        Cálculo algebraico exacto de los parámetros de la topología U-Net.
-        Reemplaza la llamada a Keras/TensorFlow, operando en O(1).
-        """
+        """Cálculo algebraico exacto de los parámetros de la topología U-Net."""
         depth = config['depth']
         filters = config['initial_filters']
         kernel = config['kernel_size'][0] if isinstance(config['kernel_size'], list) else config['kernel_size']
@@ -29,91 +25,73 @@ class DLProblemZCP(DLProblemRefactor):
         total_params = 0
         in_channels = self.input_shape[-1]
         
-        # 1. Encoder (Bajada)
+        # Encoder
         current_filters = filters
         for i in range(depth):
             params_conv1 = (kernel * kernel * in_channels * current_filters) + (current_filters if use_bias else 0)
             if use_bn: params_conv1 += (4 * current_filters)
-            
             params_conv2 = (kernel * kernel * current_filters * current_filters) + (current_filters if use_bias else 0)
             if use_bn: params_conv2 += (4 * current_filters)
-            
             total_params += (params_conv1 + params_conv2)
             in_channels = current_filters
             current_filters *= 2
             
-        # 2. Bottleneck (Cuello de botella)
+        # Bottleneck
         params_bot1 = (kernel * kernel * in_channels * current_filters) + (current_filters if use_bias else 0)
         if use_bn: params_bot1 += (4 * current_filters)
-        
         params_bot2 = (kernel * kernel * current_filters * current_filters) + (current_filters if use_bias else 0)
         if use_bn: params_bot2 += (4 * current_filters)
-        
         total_params += (params_bot1 + params_bot2)
         in_channels = current_filters
         
-        # 3. Decoder (Subida)
+        # Decoder
         for i in range(depth):
             current_filters //= 2
-            
             if config['upsample_type'] == 'TransposeConv':
                 params_up = (2 * 2 * in_channels * current_filters) + (current_filters if use_bias else 0)
                 total_params += params_up
-                
             in_channels = current_filters * 2 
-            
             params_dec1 = (kernel * kernel * in_channels * current_filters) + (current_filters if use_bias else 0)
             if use_bn: params_dec1 += (4 * current_filters)
-            
             params_dec2 = (kernel * kernel * current_filters * current_filters) + (current_filters if use_bias else 0)
             if use_bn: params_dec2 += (4 * current_filters)
-            
             total_params += (params_dec1 + params_dec2)
             in_channels = current_filters
             
-        # 4. Capa de Salida
-        out_classes = 1
-        params_out = (1 * 1 * in_channels * out_classes) + (out_classes if use_bias else 0)
-        total_params += params_out
-        
+        # Salida
+        total_params += (1 * 1 * in_channels * 1) + (1 if use_bias else 0)
         return total_params
 
     def evaluate(self, solution):
         """
-        Intercepta la evaluación estándar evitando el uso de GPUs / workers pesados.
+        Evaluación híbrida que mide el tiempo real de ejecución para
+        compatibilidad con el script de graficación y análisis de latencia.
         """
         try:
-            if hasattr(self, 'debugger') and self.debugger:
-                self.debugger.start_step('evaluate_solution_zcp', {
-                    'variables': solution.variables.tolist() if isinstance(solution.variables, np.ndarray) else solution.variables,
-                })
-
-            if not self._is_within_bounds(solution.variables):
-                solution.objectives = np.full(self.n_objectives, np.inf)
-                solution.constraints = np.full(self.n_constraints, np.inf)
-                solution.invalid_genotype = True
-                return
-
+            start_eval_time = time.perf_counter()
             config = self.decode_solution(solution.variables)
-            
-            # OBJETIVO 1: Inferencia Subrogada (Predicción de Dice Loss)
-            predicted_loss = self.surrogate.predict_loss(config)
-            
-            # OBJETIVO 2: Cálculo Analítico (Volumen de Parámetros Normalizado)
+            if self.verbose >= 1: print(f"\n--> [CACHE MISS] Evaluando arquitectura: {config}")
+            # Cálculo de métricas
+            predicted_loss = float(self.surrogate.predict_loss(config))
             raw_params = self._calculate_params_analytical(config)
-            obj_params_norm = float((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params))
-            obj_params_norm = float(np.clip(obj_params_norm, 0.0, 1.0))
             
-            # Asignación atómica de objetivos, evitando compilación de grafos
-            solution.objectives = np.array([predicted_loss, obj_params_norm])
-            solution.constraints = np.zeros(self.n_constraints)
-            solution.set_metadata(config=config, training_time=0.001, epoch=0)
+            # Normalización
+            obj_dice_loss = float(predicted_loss)
+            obj_params_norm = float(np.clip((raw_params - self.z_min_params) / (self.z_max_params - self.z_min_params), 0.0, 1.0))
+            
+            elapsed_time = time.perf_counter() - start_eval_time
+            
+            # Print formateado para el script de graficación con tiempo real
+            if self.verbose >= 1:
+                print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Tiempo: {elapsed_time:.6f}s")
 
-            if hasattr(self, 'debugger') and self.debugger:
-                self.debugger.pass_step('evaluate_solution_zcp', 'Evaluación Híbrida ZCP Exitosa')
+            solution.objectives = np.array([obj_dice_loss, obj_params_norm])
+            solution.constraints = np.zeros(self.n_constraints)
+            # metadata requerida por el visualizador
+            solution.set_metadata(config=config, training_time=elapsed_time, epoch=0)
 
         except Exception as e:
-            if self.verbose >= 1: print(f"    [ZCP ERROR] Fallo en la evaluación híbrida: {e}")
+            if self.verbose >= 1: print(f"    [ZCP ERROR] Fallo en evaluación: {e}")
             solution.objectives = np.full(self.n_objectives, np.inf)
             solution.constraints = np.full(self.n_constraints, np.inf)
             solution.invalid_genotype = True
