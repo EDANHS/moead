@@ -18,7 +18,9 @@ class DLProblemZCP(DLProblemRefactor):
         """Cálculo algebraico exacto de los parámetros de la topología U-Net."""
         depth = config['depth']
         filters = config['initial_filters']
-        kernel = config['kernel_size'][0] if isinstance(config['kernel_size'], list) else config['kernel_size']
+        kernel_raw = config.get('kernel_size', 3)
+        kernel = int(kernel_raw[0]) if isinstance(kernel_raw, (list, tuple)) else int(kernel_raw)
+        
         use_bias = config['use_bias']
         use_bn = (config['norm_type'] == 'Batch')
         
