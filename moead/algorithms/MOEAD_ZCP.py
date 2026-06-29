@@ -1,7 +1,7 @@
 # Archivo modificado: MOEAD_ZCP.py
 import time
 import numpy as np
-from MOEAD_DL import MOEAD_DL
+from .MOEAD_DL import MOEAD_DL
 from moead.utils import JSONLogger
 from moead.initializer import ZeroCostWarmup
 
