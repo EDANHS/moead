@@ -29,5 +29,5 @@ class History:
         return {
             'z_star_per_gen': [z.tolist() if hasattr(z, 'tolist') else z for z in self.z_star_per_gen],
             'archive_size_per_gen': self.archive_size_per_gen,
-            'population_history': self.population_history  # NUEVO
+            'population_history': self.population_history 
         }

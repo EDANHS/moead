@@ -272,3 +272,108 @@ def bounds_worker(q, input_shape, min_config, max_config):
     except Exception as e:
         print(f"    [ERROR Bounds] Falló la instanciación de los límites: {e}")
         q.put((53.0, 350000000.0)) # Fallback genérico
+
+
+
+def zcp_evaluation_worker(queue, 
+                          config: dict, 
+                          input_shape: tuple, 
+                          max_trainable_params: float, 
+                          use_gpu: bool, 
+                          proxy_type: str = "synflow"):
+    """
+    Proceso hijo aislado para inferencia analítica de Zero-Cost Proxies.
+    Calcula la viabilidad topológica sin instanciar optimizadores ni iterar datos.
+    """
+    # 1. Blindaje de Memoria (Ambiente OS)
+    os.environ['TF_GPU_ALLOCATOR'] = 'cuda_malloc_async'
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+    os.environ['CUDA_CACHE_MAXSIZE'] = '4294967296'
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    
+    raw_params = 0
+
+    try:
+        configure_device(use_gpu=use_gpu)
+        import tensorflow as tf
+        from tensorflow.keras import mixed_precision
+        from moead.models import build_unet
+
+        # Opcional: Estandarizar precisión para evitar desbordamientos numéricos en gradientes
+        mixed_precision.set_global_policy("float32") 
+
+        # 2. Instanciación Ab Initio (Pesos Aleatorios, Sin Compilar)
+        model = build_unet(input_shape, **config)
+        raw_params = model.count_params()
+
+        # Barrera Paramétrica de Seguridad
+        if raw_params > max_trainable_params:
+            queue.put({
+                "success": False, "zcp_score": -np.inf, "params": raw_params, "error": "OOM_PREVENTION"
+            })
+            return
+
+        # 3. Metodología Synflow (Conservación de Flujo Sináptico)
+        if proxy_type == "synflow":
+            # Generación del tensor sintético (1 solo batch dimensionado a la arquitectura)
+            dummy_input = tf.ones((1, *input_shape), dtype=tf.float32)
+
+            with tf.GradientTape() as tape:
+                # Intervención crítica: Aseguramos que la red observe los datos de entrada
+                tape.watch(dummy_input)
+                
+                # Propagación Forward
+                output = model(dummy_input, training=False)
+                
+                # Sustitución de la función de pérdida empírica por una suma escalar de activaciones
+                surrogate_loss = tf.reduce_sum(output)
+
+            # Propagación Backward: Extracción de gradientes puros
+            grads = tape.gradient(surrogate_loss, model.trainable_weights)
+
+            # Cálculo de la métrica agregada: Sumatoria del valor absoluto del producto de Hadamard
+            # zcp_score = Sum( | gradientes * pesos | )
+            zcp_score = 0.0
+            for grad, weight in zip(grads, model.trainable_weights):
+                if grad is not None:
+                    # Conversión temporal a float64 para retener precisión en arquitecturas masivas
+                    layer_score = tf.reduce_sum(tf.abs(grad * weight))
+                    zcp_score += float(layer_score.numpy())
+
+        else:
+            raise ValueError(f"La heurística ZCP '{proxy_type}' no está implementada.")
+
+        # 4. Transmisión de Resultados al Orquestador
+        queue.put({
+            "success": True,
+            "zcp_score": zcp_score,
+            "params": raw_params,
+            "error": None
+        })
+
+    except Exception as e:
+        error_msg = str(e)
+        if "ResourceExhaustedError" in error_msg or "OOM" in error_msg:
+            error_type = "OOM_CRASH"
+        else:
+            error_type = traceback.format_exc()
+            
+        queue.put({
+            "success": False, "zcp_score": -np.inf, "params": raw_params, "error": error_type
+        })
+        
+    finally:
+        # 5. Destrucción Sistemática del Grafo Computacional
+        local_vars = ['model', 'dummy_input', 'grads', 'output', 'tape']
+        for var in local_vars:
+            if var in locals():
+                del locals()[var]
+
+        # Purga profunda del motor de Keras
+        try:
+            from tensorflow.keras import backend as K
+            K.clear_session()
+        except Exception:
+            pass 
+        
+        gc.collect()
