@@ -1,4 +1,5 @@
 import json
+import joblib
 import os
 import pickle
 import numpy as np
@@ -8,23 +9,31 @@ from sklearn.metrics import mean_squared_error
 class SurrogatePredictor:
     """
     Oráculo de Predicción (Zero-Cost Surrogate).
-    Diseñado para interoperar con 'DLProblemRefactor', manteniendo la integridad
-    geométrica de los hiperparámetros y previniendo errores de propagación de tipos
-    durante el cálculo analítico de complejidad paramétrica.
+    Mapea el genotipo y los componentes analíticos de una U-Net para
+    predecir su Dice Loss de forma instantánea sin compilar grafos.
     """
     def __init__(self, history_file_path: str = None, model_path: str = None):
+        """
+        :param history_file_path: Ruta del JSON maestro unificado.
+        :param model_path: Ruta opcional para guardar/cargar el modelo serializado (.pkl).
+        """
         self.history_file_path = history_file_path
         self.model_path = model_path
         self.is_trained = False
         
-        self.model = RandomForestRegressor(n_estimators=250, max_depth=None, random_state=42, n_jobs=-1)
+        # Configuración del regresor optimizado para CPU multi-núcleo
+        self.model = RandomForestRegressor(n_estimators=200, 
+                                           max_depth=None, 
+                                           random_state=42, 
+                                           n_jobs=-1)
         
-        # Mapeos estructurales espejo de DLProblemRefactor
+        # Mapeos categóricos estructurales
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None']
         self.pool_opts = ['Max', 'Average']
         self.upsample_opts = ['TransposeConv', 'BilinearUpsample']
 
+        # Intentar carga automática si se provee un binario existente
         if self.model_path and os.path.exists(self.model_path):
             self._load_model_binary()
 
@@ -111,21 +120,45 @@ class SurrogatePredictor:
         if verbose >= 1:
             print(f"--> [SURROGATE] Entrenamiento consolidado con {len(X)} arquitecturas validadas.")
 
+
     def predict_loss(self, config: dict) -> float:
         """Inferencia de Dice Loss con clip de seguridad [0, 1]."""
         if not self.is_trained:
             return 0.5 # Valor neutro si el modelo aún no está hidratado
             
         features = self._vectorize_config(config)
-        print(f"config: {features}")
+        print(f"--> [SURROGATE] Prediciendo Dice Loss para configuración: {config}")
         return float(np.clip(self.model.predict([features.reshape(1, -1)])[0], 0.0, 1.0))
 
     def _save_model_binary(self):
-        with open(self.model_path, 'wb') as f:
-            pickle.dump({'model': self.model, 'is_trained': self.is_trained}, f)
+        """Guarda el objeto estructurado de scikit-learn en un archivo binario."""
+        
+        # Asegurarse de que el directorio exista
+        directorio = os.path.dirname(self.model_path)
+        if directorio:
+            os.makedirs(directorio, exist_ok=True)
+            
+        estado = {
+            'model': self.model,
+            'is_trained': self.is_trained,
+            'feature_len': len(self.model.feature_importances_)
+        }
+        
+        # Usamos joblib con compress=3 para mantener el archivo ligero
+        joblib.dump(estado, self.model_path, compress=3)
+        print(f"[+] Estado del binario persistido de forma atómica en: {self.model_path}")
 
     def _load_model_binary(self):
-        with open(self.model_path, 'rb') as f:
-            state = pickle.load(f)
+        """Carga e inyecta el binario directamente evitando lecturas de JSON."""
+        try:
+            # Joblib lee directamente la ruta y maneja la descompresión
+            state = joblib.load(self.model_path)
             self.model = state['model']
-            self.is_trained = state['is_trained']
+            
+            # Soporte de retrocompatibilidad: si el dict guardado tiene 'is_trained', lo usamos
+            self.is_trained = state.get('is_trained', True) 
+            
+            print(f"[+] Oráculo rehidratado instantáneamente desde archivo binario: {self.model_path}\n")
+        except Exception as e:
+            print(f"[ERROR] No se pudo cargar el oráculo binario: {e}")
+            self.is_trained = False
