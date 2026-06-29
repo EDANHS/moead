@@ -127,8 +127,13 @@ class SurrogatePredictor:
             return 0.5 # Valor neutro si el modelo aún no está hidratado
             
         features = self._vectorize_config(config)
-        print(f"--> [SURROGATE] Prediciendo Dice Loss para configuración: {config}")
-        return float(np.clip(self.model.predict([features.reshape(1, -1)])[0], 0.0, 1.0))
+        
+        features_2d = features.reshape(1, -1)
+        print(f"--> [SURROGATE] Prediciendo Dice Loss para configuración: {config} - Vector de características: {features_2d}")
+        # Eliminamos el envoltorio extra [...] y el [0] innecesario
+        prediction = self.model.predict(features_2d)
+        
+        return float(np.clip(prediction[0], 0.0, 1.0))
 
     def _load_model_binary(self):
         """Carga el modelo usando Joblib con validación de tipo de archivo."""
