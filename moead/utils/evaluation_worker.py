@@ -298,9 +298,6 @@ def zcp_evaluation_worker(queue,
     jacobian_score = -np.inf
 
     try:
-        print("WORKER ZCP: Configurando entorno TensorFlow...")
-        # Asumimos que configure_device está disponible en tu entorno
-        from moead.utils import configure_device
         configure_device(use_gpu=use_gpu)
         
         import tensorflow as tf
