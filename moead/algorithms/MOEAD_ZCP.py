@@ -30,7 +30,7 @@ class MOEAD_ZCP(MOEAD_DL):
         if self.current_gen == 0 and current_pop_size < self.n_pop and not resumed:
             
             # Delegación atómica usando la interfaz .execute()
-            elite_population = self.warmup_initializer.execute(self.problem, self.n_pop, self.history)
+            elite_population = self.warmup_initializer.execute(self.problem, self.n_pop)
             
             # Incorporación de la élite a las estructuras del MOEA/D
             for i, sol in enumerate(elite_population):
