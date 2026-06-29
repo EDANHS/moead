@@ -39,18 +39,19 @@ class SurrogatePredictor:
 
     def _vectorize_config(self, config: dict) -> np.ndarray:
         """
-        Transforma el diccionario genotípico en un vector numérico plano.
-        Soporta de forma adaptativa la inclusión o ausencia de métricas ZCP.
+        Transforma el diccionario genotípico en un vector numérico plano,
+        asegurando una dimensionalidad fija de 12 elementos mediante padding
+        si las métricas ZCP no están disponibles.
         """
         # --- FIX ROBUSTO DE EXTRACCIÓN DE KERNEL ---
         raw_kernel = config.get('kernel_size', 3)
         if isinstance(raw_kernel, (list, tuple)):
-            kernel_val = float(raw_kernel[0]) # Tomamos la primera dimensión si es iterable
+            kernel_val = float(raw_kernel[0]) 
         else:
             kernel_val = float(raw_kernel)
         # -------------------------------------------
         
-        # 1. Características base de la topología (Grados de libertad)
+        # 1. Características base (9 elementos)
         features = [
             float(config['depth']),
             float(config['initial_filters']),
@@ -63,11 +64,11 @@ class SurrogatePredictor:
             float(self.upsample_opts.index(config.get('upsample_type', 'TransposeConv')))
         ]
         
-        # 2. Inclusión dinámica de métricas ZCP si se encuentran en el diccionario
-        # Esto permite que la misma clase sirva para el MVP y para la versión avanzada con Jacobiano
-        if 'zcp_synflow' in config: features.append(float(config['zcp_synflow']))
-        if 'zcp_snip' in config: features.append(float(config['zcp_snip']))
-        if 'zcp_jacobian' in config: features.append(float(config['zcp_jacobian']))
+        # 2. PADDING DE DIMENSIONALIDAD (Forzar 12 features)
+        # Inyectamos métricas ZCP si existen, de lo contrario, completamos con 0.0
+        features.append(float(config.get('zcp_synflow', 0.0)))
+        features.append(float(config.get('zcp_snip', 0.0)))
+        features.append(float(config.get('zcp_jacobian', 0.0)))
             
         return np.array(features)
 
