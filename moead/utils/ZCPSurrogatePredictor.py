@@ -42,13 +42,19 @@ class SurrogatePredictor:
         Transforma el diccionario genotípico en un vector numérico plano.
         Soporta de forma adaptativa la inclusión o ausencia de métricas ZCP.
         """
-        kernel_val = config['kernel_size'][0] if isinstance(config['kernel_size'], list) else config['kernel_size']
+        # --- FIX ROBUSTO DE EXTRACCIÓN DE KERNEL ---
+        raw_kernel = config.get('kernel_size', 3)
+        if isinstance(raw_kernel, (list, tuple)):
+            kernel_val = float(raw_kernel[0]) # Tomamos la primera dimensión si es iterable
+        else:
+            kernel_val = float(raw_kernel)
+        # -------------------------------------------
         
-        # 1. Características base de la topología
+        # 1. Características base de la topología (Grados de libertad)
         features = [
             float(config['depth']),
             float(config['initial_filters']),
-            float(kernel_val),
+            kernel_val,
             float(self.act_opts.index(config.get('activation_name', 'ReLU'))),
             float(self.norm_opts.index(config.get('norm_type', 'Batch'))),
             float(config.get('dropout_rate', 0.0)),
