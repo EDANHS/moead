@@ -131,27 +131,31 @@ class SurrogatePredictor:
         return float(np.clip(self.model.predict([features.reshape(1, -1)])[0], 0.0, 1.0))
 
     def _load_model_binary(self):
-        """Carga binaria con protección contra corrupción."""
+        """Carga el modelo usando Joblib con validación de tipo de archivo."""
         try:
+            # Verificación preventiva: no intentar cargar si es un archivo de texto/json
             with open(self.model_path, 'rb') as f:
-                state = pickle.load(f)
-                self.model = state['model']
-                self.is_trained = state['is_trained']
-        except (pickle.UnpicklingError, EOFError, AttributeError) as e:
-            print(f"--> [ERROR] Modelo corrupto en {self.model_path}. Forzando reinicio del subrogado. Detalle: {e}")
-            # Eliminamos el archivo corrupto para permitir un nuevo guardado limpio
-            try:
+                header = f.read(5)
+                # Joblib suele empezar con ciertos bytes binarios, si empieza con '{' es JSON corrupto
+                if header.startswith(b'{'):
+                    raise ValueError("El archivo detectado es JSON, no un binario de modelo.")
+            
+            state = joblib.load(self.model_path)
+            self.model = state['model']
+            self.is_trained = state['is_trained']
+            print(f"--> [INFO] Modelo cargado correctamente desde {self.model_path}")
+            
+        except (Exception) as e:
+            print(f"--> [ERROR] Modelo corrupto o incompatible en {self.model_path}. Detalle: {e}")
+            if os.path.exists(self.model_path):
                 os.remove(self.model_path)
-            except:
-                pass
             self.is_trained = False
             self.model = RandomForestRegressor(n_estimators=250, max_depth=None, random_state=42, n_jobs=-1)
 
-    # ... (Mantén el resto de los métodos: _normalize_kernel, _vectorize_config, train_surrogate, etc.)
-
     def _save_model_binary(self):
-        """Guarda de forma segura reemplazando el archivo anterior."""
+        """Guarda de forma segura usando Joblib."""
+        if not self.model_path:
+            return
         temp_path = self.model_path + ".tmp"
-        with open(temp_path, 'wb') as f:
-            pickle.dump({'model': self.model, 'is_trained': self.is_trained}, f)
-        os.replace(temp_path, self.model_path) # Operación atómica
+        joblib.dump({'model': self.model, 'is_trained': self.is_trained}, temp_path)
+        os.replace(temp_path, self.model_path)
