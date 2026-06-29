@@ -18,8 +18,10 @@ class DLProblemZCP(DLProblemRefactor):
         """Cálculo algebraico exacto de los parámetros de la topología U-Net."""
         depth = config['depth']
         filters = config['initial_filters']
-        kernel_raw = config.get('kernel_size', 3)
-        kernel = int(kernel_raw[0]) if isinstance(kernel_raw, (list, tuple)) else int(kernel_raw)
+        
+        # SANEAMIENTO DE SEGURIDAD (FIX ROBUSTO):
+        k_val = config.get('kernel_size', 3)
+        kernel = int(k_val[0]) if isinstance(k_val, (list, tuple)) else int(k_val)
         
         use_bias = config['use_bias']
         use_bn = (config['norm_type'] == 'Batch')
@@ -30,6 +32,7 @@ class DLProblemZCP(DLProblemRefactor):
         # Encoder
         current_filters = filters
         for i in range(depth):
+            # Usamos el escalar 'kernel' ya sanitizado
             params_conv1 = (kernel * kernel * in_channels * current_filters) + (current_filters if use_bias else 0)
             if use_bn: params_conv1 += (4 * current_filters)
             params_conv2 = (kernel * kernel * current_filters * current_filters) + (current_filters if use_bias else 0)
@@ -62,7 +65,7 @@ class DLProblemZCP(DLProblemRefactor):
             
         # Salida
         total_params += (1 * 1 * in_channels * 1) + (1 if use_bias else 0)
-        return total_params
+        return int(total_params)
 
     def evaluate(self, solution):
         """
