@@ -17,7 +17,7 @@ class MOEAD_ZCP(MOEAD_DL):
         """
         super().__init__(*args, **kwargs)
         # Si no se provee un inicializador, se instancia uno por defecto (1,000 muestras)
-        self.warmup_initializer = warmup_initializer if warmup_initializer else ZeroCostWarmup(warmup_size=warmup_size)
+        self.warmup_initializer = warmup_initializer if warmup_initializer else ZeroCostWarmup(warmup_size=warmup_size, verbose=1)
 
     def run(self):
         print(f"Iniciando MOEA/D-ZCP Acelerado (M={self.m}, N={self.n_pop})")
