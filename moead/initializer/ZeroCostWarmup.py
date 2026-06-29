@@ -74,15 +74,12 @@ class ZeroCostWarmup:
                     raw_params = problem._calculate_params_analytical(config)
                     obj_params_norm = float(np.clip((raw_params - problem.z_min_params) / (problem.z_max_params - problem.z_min_params), 0.0, 1.0))
             
-                    if self.verbose >= 1:
-                        print(f"\n--> [CACHE MISS] Evaluando arquitectura: {config}")
-                        print(f"    Resultados -> Dice Loss: {candidate['pred_dice']:.4f} | Parámetros: {obj_params_norm} | T: {elapsed_time:.6f}s")
-                    
-                    if self.verbose >= 2:
-                        print(f"    [OK] Arq {idx:04d} | ZCP: {result.get('zcp_synflow', 0):.2e}")
+                    print(f"\n--> [CACHE MISS] Evaluando arquitectura: {config}")
+                    print(f"    Resultados -> Dice Loss: {candidate['pred_dice']:.4f} | Parámetros: {obj_params_norm} | T: {elapsed_time:.6f}s")
+                
+                    print(f"    [OK] Arq {idx:04d} | ZCP: {result.get('zcp_synflow', 0):.2e}")
                 else:
-                    if self.verbose >= 2:
-                        print(f"    [!] Arq {idx:04d} Fallida: {result.get('error', 'Desconocido')}")
+                    print(f"    [!] Arq {idx:04d} Fallida: {result.get('error', 'Desconocido')}")
             finally:
                 process.join()
 
