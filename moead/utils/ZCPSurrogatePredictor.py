@@ -1,4 +1,5 @@
 import json
+import joblib
 import os
 import pickle
 import numpy as np
@@ -131,18 +132,33 @@ class SurrogatePredictor:
 
     def _save_model_binary(self):
         """Guarda el objeto estructurado de scikit-learn en un archivo binario."""
-        with open(self.model_path, 'wb') as f:
-            pickle.dump({
-                'model': self.model,
-                'is_trained': self.is_trained,
-                'feature_len': len(self.model.feature_importances_)
-            }, f)
+        
+        # Asegurarse de que el directorio exista
+        directorio = os.path.dirname(self.model_path)
+        if directorio:
+            os.makedirs(directorio, exist_ok=True)
+            
+        estado = {
+            'model': self.model,
+            'is_trained': self.is_trained,
+            'feature_len': len(self.model.feature_importances_)
+        }
+        
+        # Usamos joblib con compress=3 para mantener el archivo ligero
+        joblib.dump(estado, self.model_path, compress=3)
         print(f"[+] Estado del binario persistido de forma atómica en: {self.model_path}")
 
     def _load_model_binary(self):
         """Carga e inyecta el binario directamente evitando lecturas de JSON."""
-        with open(self.model_path, 'rb') as f:
-            state = pickle.load(f)
+        try:
+            # Joblib lee directamente la ruta y maneja la descompresión
+            state = joblib.load(self.model_path)
             self.model = state['model']
-            self.is_trained = state['is_trained']
-        print(f"[+] Oráculo rehidratado instantáneamente desde archivo binario: {self.model_path}\n")
+            
+            # Soporte de retrocompatibilidad: si el dict guardado tiene 'is_trained', lo usamos
+            self.is_trained = state.get('is_trained', True) 
+            
+            print(f"[+] Oráculo rehidratado instantáneamente desde archivo binario: {self.model_path}\n")
+        except Exception as e:
+            print(f"[ERROR] No se pudo cargar el oráculo binario: {e}")
+            self.is_trained = False
