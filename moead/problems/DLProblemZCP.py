@@ -81,7 +81,7 @@ class DLProblemZCP(DLProblemRefactor):
 
             if hasattr(solution, 'zcp_metrics'):
                 config.update(solution.zcp_metrics)
-                
+
             # Cálculo de métricas
             predicted_loss = float(self.surrogate.predict_loss(config))
             raw_params = self._calculate_params_analytical(config)
@@ -95,7 +95,7 @@ class DLProblemZCP(DLProblemRefactor):
             # Print formateado para el script de graficación con tiempo real
             if self.verbose >= 1:
                 print(f"    Resultados -> Dice Loss: {obj_dice_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Tiempo: {elapsed_time:.6f}s")
-                print(f"    [OK] ZCP-Synflow: {solution.zcp_metrics['synflow']:.2e} | ZCP-SNIP: {solution.zcp_metrics['snip']:.2e} | ZCP-Jacobian: {solution.zcp_metrics['jacobian']:.2e}")
+                print(f"    [OK] ZCP-Synflow: {solution.zcp_metrics['zcp_synflow']:.2e} | ZCP-SNIP: {solution.zcp_metrics['zcp_snip']:.2e} | ZCP-Jacobian: {solution.zcp_metrics['zcp_jacobian']:.2e}")
             solution.objectives = np.array([obj_dice_loss, obj_params_norm])
             solution.constraints = np.zeros(self.n_constraints)
             # metadata requerida por el visualizador
