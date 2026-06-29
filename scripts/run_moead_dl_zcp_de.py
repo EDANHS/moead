@@ -54,14 +54,14 @@ def parse_args():
     p.add_argument('--experiment-name', type=str, default='zcp_de_baseline', help='Directorio de salida para aislar los resultados de esta ejecución')
     p.add_argument('--surrogate-model', type=str, default='rf_surrogate_model.joblib', help='Ruta al binario del modelo Random Forest pre-entrenado')
     p.add_argument('--warmup-multiplier', type=int, default=10, help='Factor multiplicador escalar poblacional para el Warmup ZCP')
-    p.add_argument('--pool-size', type=int, default=5, help='Descendientes generados y filtrados por el Move Proposal (DE)')
+    p.add_argument('--pool-size', type=int, default=3, help='Descendientes generados y filtrados por el Move Proposal (DE)')
     
     # Nomenclaturas adaptadas al marco híbrido
     p.add_argument('--log', type=str, default='zcp_de_moead_log.json', help='Log de transacciones evolutivas')
     p.add_argument('--checkpoint', type=str, default='zcp_de_moead_checkpoint.pkl', help='Punto de restauración de memoria')
     p.add_argument('--output-metadata', type=str, default='zcp_de_moead_metadata.json', help='Metadatos y telemetría de ejecución')
     p.add_argument('--verbose', type=int, default=1, help='0: Silencio | 1: Info Clave | 2: Trazabilidad profunda')
-    p.add_argument('--carpeta', type=str, default='resultados', help='Subcarpeta de resultados dentro del proyecto para aislar la ejecución')
+    p.add_argument('--carpeta', type=str, default='resultados_zcp', help='Subcarpeta de resultados dentro del proyecto para aislar la ejecución')
     return p.parse_args()
 
 
