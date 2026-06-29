@@ -103,6 +103,6 @@ class DLProblemZCP(DLProblemRefactor):
 
         except Exception as e:
             if self.verbose >= 1: print(f"    [ZCP ERROR] Fallo en evaluación: {e}")
-            solution.objectives = np.full(self.n_objectives, np.inf)
+            solution.objectives = np.array([1.0, 1.0])
             solution.constraints = np.full(self.n_constraints, np.inf)
             solution.invalid_genotype = True

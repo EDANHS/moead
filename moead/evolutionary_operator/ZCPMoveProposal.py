@@ -128,26 +128,24 @@ class ZCPMoveProposal(EvolutionaryOperator):
             z_min = problem.z_min_params if hasattr(problem, 'z_min_params') else 53
             z_max = problem.z_max_params if hasattr(problem, 'z_max_params') else  35000000.0
             obj_params_norm = float(np.clip((raw_params - z_min) / (z_max - z_min), 0.0, 1.0))
-            
+
             elapsed_time = time.perf_counter() - start_eval
 
             self._force_print(f"\n--> [CACHE MISS] Evaluando arquitectura: {config}")
             self._force_print(f"    Resultados -> Dice Loss Pred: {predicted_loss:.4f} | Params Norm: {obj_params_norm:.4f} | Latencia: {elapsed_time:.4f}s")
             self._force_print(f"    [OK] Arq {_:04d} | ZCP-Synflow: {synflow:.2e} | ZCP-SNIP: {snip:.2e} | ZCP-Jacobian: {jacobian:.2e}")
+            
+            
             # 4. Presión Selectiva (Torneo de Supervivencia Interno)
+            setattr(child, 'zcp_metrics', {
+                'zcp_synflow': config['zcp_synflow'],
+                'zcp_snip': config['zcp_snip'],
+                'zcp_jacobian': config['zcp_jacobian']
+            })
+
             if predicted_loss < best_predicted_loss:
                 best_predicted_loss = predicted_loss
                 best_child = child
-                
-                # 5. Persistencia de Estado Propagado
-                # Inyectamos el diccionario ZCP en la ontología del objeto Solution
-                # Esto previene recalculos redundantes cuando el orquestador principal 
-                # invoque a problem.evaluate(child)
-                setattr(best_child, 'zcp_metrics', {
-                    'zcp_synflow': config['zcp_synflow'],
-                    'zcp_snip': config['zcp_snip'],
-                    'zcp_jacobian': config['zcp_jacobian']
-                })
 
         # --- Mitigación de Fallos (Fault Tolerance) ---
         if best_child is None:
