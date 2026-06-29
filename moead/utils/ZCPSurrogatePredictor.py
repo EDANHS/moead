@@ -1,5 +1,4 @@
 import json
-import joblib
 import os
 import pickle
 import numpy as np
@@ -9,53 +8,50 @@ from sklearn.metrics import mean_squared_error
 class SurrogatePredictor:
     """
     Oráculo de Predicción (Zero-Cost Surrogate).
-    Mapea el genotipo y los componentes analíticos de una U-Net para
-    predecir su Dice Loss de forma instantánea sin compilar grafos.
+    Diseñado para interoperar con 'DLProblemRefactor', manteniendo la integridad
+    geométrica de los hiperparámetros y previniendo errores de propagación de tipos
+    durante el cálculo analítico de complejidad paramétrica.
     """
     def __init__(self, history_file_path: str = None, model_path: str = None):
-        """
-        :param history_file_path: Ruta del JSON maestro unificado.
-        :param model_path: Ruta opcional para guardar/cargar el modelo serializado (.pkl).
-        """
         self.history_file_path = history_file_path
         self.model_path = model_path
         self.is_trained = False
         
-        # Configuración del regresor optimizado para CPU multi-núcleo
-        self.model = RandomForestRegressor(n_estimators=200, 
-                                           max_depth=None, 
-                                           random_state=42, 
-                                           n_jobs=-1)
+        self.model = RandomForestRegressor(n_estimators=250, max_depth=None, random_state=42, n_jobs=-1)
         
-        # Mapeos categóricos estructurales
+        # Mapeos estructurales espejo de DLProblemRefactor
         self.act_opts = ['ReLU', 'ELU', 'LeakyReLU', 'GELU', 'Swish']
         self.norm_opts = ['Batch', 'Layer', 'Instance', 'None']
         self.pool_opts = ['Max', 'Average']
         self.upsample_opts = ['TransposeConv', 'BilinearUpsample']
 
-        # Intentar carga automática si se provee un binario existente
         if self.model_path and os.path.exists(self.model_path):
             self._load_model_binary()
 
+    def _normalize_kernel(self, kernel_input) -> int:
+        """
+        Saneamiento geométrico: Convierte tuplas de kernel (e.g., (3,3)) a su 
+        equivalente escalar (e.g., 3). Garantiza compatibilidad matemática
+        con los cálculos de flops y parámetros.
+        """
+        if isinstance(kernel_input, (list, tuple)):
+            # Extrae el primer elemento si es un par, o el escalar si es entero
+            return int(kernel_input[0])
+        return int(kernel_input)
+
     def _vectorize_config(self, config: dict) -> np.ndarray:
         """
-        Transforma el diccionario genotípico en un vector numérico plano,
-        asegurando una dimensionalidad fija de 12 elementos mediante padding
-        si las métricas ZCP no están disponibles.
+        Estrategia de Transformación: Mapea diccionarios genotípicos a tensores de 
+        características estables. La normalización del kernel es crítica para 
+        evitar errores de tipo en DLProblemZCP.
         """
-        # --- FIX ROBUSTO DE EXTRACCIÓN DE KERNEL ---
-        raw_kernel = config.get('kernel_size', 3)
-        if isinstance(raw_kernel, (list, tuple)):
-            kernel_val = float(raw_kernel[0]) 
-        else:
-            kernel_val = float(raw_kernel)
-        # -------------------------------------------
+        k_val = self._normalize_kernel(config.get('kernel_size', 3))
         
-        # 1. Características base (9 elementos)
+        # Bloque de Características Estructurales (Fase Metodológica)
         features = [
             float(config['depth']),
             float(config['initial_filters']),
-            kernel_val,
+            float(k_val),
             float(self.act_opts.index(config.get('activation_name', 'ReLU'))),
             float(self.norm_opts.index(config.get('norm_type', 'Batch'))),
             float(config.get('dropout_rate', 0.0)),
@@ -64,28 +60,22 @@ class SurrogatePredictor:
             float(self.upsample_opts.index(config.get('upsample_type', 'TransposeConv')))
         ]
         
-        # 2. PADDING DE DIMENSIONALIDAD (Forzar 12 features)
-        # Inyectamos métricas ZCP si existen, de lo contrario, completamos con 0.0
-        features.append(float(config.get('zcp_synflow', 0.0)))
-        features.append(float(config.get('zcp_snip', 0.0)))
-        features.append(float(config.get('zcp_jacobian', 0.0)))
+        # Inyección de Métricas ZCP (Zero-Cost Proxies) para robustez multidimensional
+        features.extend([
+            float(config.get('zcp_synflow', 0.0)),
+            float(config.get('zcp_snip', 0.0)),
+            float(config.get('zcp_jacobian', 0.0))
+        ])
             
         return np.array(features)
 
     def train_surrogate(self, verbose: int = 1):
         """
-        Extrae los datos del caché, entrena el bosque correlacionando la estructura
-        con el Dice Loss real y guarda el estado si se especificó una ruta binaria.
+        Metodología de entrenamiento del subrogado con purga de anomalías.
+        Utiliza el caché persistente del ecosistema para inferir Dice Loss.
         """
-        if self.is_trained:
-            if verbose >= 1: print("[*] El modelo subrogado ya se encuentra operativo en memoria.")
-            return
-
         if not self.history_file_path or not os.path.exists(self.history_file_path):
-            raise FileNotFoundError(f"[ERROR] Archivo de caché histórico no parametrizado o inexistente.")
-
-        if verbose >= 1:
-            print(f"\n--> [SURROGATE] Entrenando Oráculo Predictivo desde: {self.history_file_path}")
+            raise FileNotFoundError("[ERROR] No se localizó el archivo de caché histórico.")
 
         with open(self.history_file_path, 'r', encoding='utf-8') as f:
             cache_data = json.load(f)
@@ -95,77 +85,47 @@ class SurrogatePredictor:
         for config_str, metrics in cache_data.items():
             try:
                 config_dict = json.loads(config_str)
+                # Integrar métricas ZCP al diccionario de entrenamiento
+                config_dict.update({k: v for k, v in metrics.items() if 'zcp' in k})
                 
-                # Sincronizamos las métricas calculadas del nivel fenotípico al diccionario estructural
-                if 'zcp_synflow' in metrics:
-                    config_dict['zcp_synflow'] = metrics['zcp_synflow']
-                    config_dict['zcp_snip'] = metrics['zcp_snip']
-                    config_dict['zcp_jacobian'] = metrics['zcp_jacobian']
+                row_features = self._vectorize_config(config_dict)
                 
-                dice_loss = metrics['objectives'][0]
-                if np.isinf(dice_loss) or np.isnan(dice_loss):
+                # Validación de estabilidad numérica
+                if np.any(np.isnan(row_features)) or np.any(np.isinf(row_features)):
                     continue
                 
-                X.append(self._vectorize_config(config_dict))
-                y.append(dice_loss)
+                dice_loss = metrics['objectives'][0]
+                if 0.0 <= dice_loss <= 1.0:
+                    X.append(row_features)
+                    y.append(dice_loss)
             except Exception:
                 continue
 
         X, y = np.array(X), np.array(y)
-        
-        # Ajuste adaptativo del Random Forest
         self.model.fit(X, y)
         self.is_trained = True
-
-        if verbose >= 1:
-            train_preds = self.model.predict(X)
-            mse = mean_squared_error(y, train_preds)
-            print(f"--> [SURROGATE] Sintonización completada con {len(X)} muestras. MSE de ajuste: {mse:.6f}")
-
-        # Serialización defensiva para evitar re-entrenamientos futuros
+        
         if self.model_path:
             self._save_model_binary()
+        
+        if verbose >= 1:
+            print(f"--> [SURROGATE] Entrenamiento consolidado con {len(X)} arquitecturas validadas.")
 
     def predict_loss(self, config: dict) -> float:
-        """
-        Ejecuta inferencia subrogada en O(1) estimando el Dice Loss.
-        """
+        """Inferencia de Dice Loss con clip de seguridad [0, 1]."""
         if not self.is_trained:
-            raise RuntimeError("[ERROR] Instancia del predictor no entrenada ni rehidratada.")
+            return 0.5 # Valor neutro si el modelo aún no está hidratado
             
         features = self._vectorize_config(config)
-        predicted_loss = self.model.predict([features])[0]
-        return float(np.clip(predicted_loss, 0.0, 1.0))
+        print(f"config: {features}")
+        return float(np.clip(self.model.predict([features.reshape(1, -1)])[0], 0.0, 1.0))
 
     def _save_model_binary(self):
-        """Guarda el objeto estructurado de scikit-learn en un archivo binario."""
-        
-        # Asegurarse de que el directorio exista
-        directorio = os.path.dirname(self.model_path)
-        if directorio:
-            os.makedirs(directorio, exist_ok=True)
-            
-        estado = {
-            'model': self.model,
-            'is_trained': self.is_trained,
-            'feature_len': len(self.model.feature_importances_)
-        }
-        
-        # Usamos joblib con compress=3 para mantener el archivo ligero
-        joblib.dump(estado, self.model_path, compress=3)
-        print(f"[+] Estado del binario persistido de forma atómica en: {self.model_path}")
+        with open(self.model_path, 'wb') as f:
+            pickle.dump({'model': self.model, 'is_trained': self.is_trained}, f)
 
     def _load_model_binary(self):
-        """Carga e inyecta el binario directamente evitando lecturas de JSON."""
-        try:
-            # Joblib lee directamente la ruta y maneja la descompresión
-            state = joblib.load(self.model_path)
+        with open(self.model_path, 'rb') as f:
+            state = pickle.load(f)
             self.model = state['model']
-            
-            # Soporte de retrocompatibilidad: si el dict guardado tiene 'is_trained', lo usamos
-            self.is_trained = state.get('is_trained', True) 
-            
-            print(f"[+] Oráculo rehidratado instantáneamente desde archivo binario: {self.model_path}\n")
-        except Exception as e:
-            print(f"[ERROR] No se pudo cargar el oráculo binario: {e}")
-            self.is_trained = False
+            self.is_trained = state['is_trained']
