@@ -6,3 +6,4 @@ from moead.problems.ZDT4Problem import ZDT4Problem
 from moead.problems.ZDT6Problem import ZDT6Problem
 from moead.problems.DLProblem import DLProblem
 from moead.problems.DLProblemRefactor import DLProblemRefactor
+from moead.problems.DLProblemZCP import DLProblemZCP
